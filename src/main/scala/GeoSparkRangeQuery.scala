@@ -37,9 +37,9 @@ object GeoSparkRangeQuery {
     val eachQueryLoopTimes = 1
 
     // execution
-    testSpatialRangeQuery()
-    //  testSpatialTemporalRangeQuery()
-    testSpatialRangeQueryUsingIndex()
+    // testSpatialRangeQuery()
+    testSpatialTemporalRangeQuery()
+    // testSpatialRangeQueryUsingIndex()
     sc.stop()
 
     def testSpatialTemporalRangeQuery() {
@@ -53,14 +53,15 @@ object GeoSparkRangeQuery {
 
       t = nanoTime()
       val spatialQueryResult  = RangeQuery.SpatialRangeQuery(taxiRDD, spatialRangeQuery, true, false)
-      println(spatialQueryResult.count())
+      spatialQueryResult.take(1)
+      // println(spatialQueryResult.count())
       val rddWithOtherAttributes = spatialQueryResult.rdd.map[String](f => f.getUserData.asInstanceOf[String])
-      rddWithOtherAttributes.take(5).filter(x => {
+      rddWithOtherAttributes.filter(x => {
         //      println(x)
         val ts = x.split("\t")(7).toLong
         //      println(ts)
         ts <= temporalRangeQuery._2 && ts >= temporalRangeQuery._1
-      })
+      }).take(1)
 
       println(s"... Range query: ${(nanoTime() - t) * 1e-9 } s.")
     }
