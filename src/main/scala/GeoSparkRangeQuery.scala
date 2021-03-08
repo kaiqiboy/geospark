@@ -15,103 +15,103 @@ object GeoSparkRangeQuery {
   def main(args: Array[String]): Unit = {
     // spark
     Logger.getLogger("org").setLevel(Level.WARN)
-      Logger.getLogger("akka").setLevel(Level.WARN)
+    Logger.getLogger("akka").setLevel(Level.WARN)
 
-      //    val conf = new SparkConf().setAppName("GeoSparkRangeQuery").setMaster("local[*]")
-      val conf = new SparkConf().setAppName("GeoSparkRangeQuery")
-      conf.set("spark.serializer", classOf[KryoSerializer].getName)
-      conf.set("spark.kryo.registrator", classOf[GeoSparkKryoRegistrator].getName)
-      val sc = new SparkContext(conf)
+    //    val conf = new SparkConf().setAppName("GeoSparkRangeQuery").setMaster("local[*]")
+    val conf = new SparkConf().setAppName("GeoSparkRangeQuery")
+    conf.set("spark.serializer", classOf[KryoSerializer].getName)
+    conf.set("spark.kryo.registrator", classOf[GeoSparkKryoRegistrator].getName)
+    val sc = new SparkContext(conf)
 
-      // input data and parameters
-      val dataFile = args(0)
-      val allowTopologyInvalidGeometries = true // Optional for GeoJsonReader.readToGeometryRDD
-      val skipSyntaxInvalidGeometries = false // Optional for GeoJsonReader.readToGeometryRDD
-      val indexType = IndexType.RTREE
+    // input data and parameters
+    val dataFile = args(0)
+    val allowTopologyInvalidGeometries = true // Optional for GeoJsonReader.readToGeometryRDD
+    val skipSyntaxInvalidGeometries = false // Optional for GeoJsonReader.readToGeometryRDD
+    val indexType = IndexType.RTREE
 
-      // query
-      val spatialRangeQuery  = new Envelope (-8.682329739182336,-8.553892156181982,
-          41.16930767535641,41.17336956864337)
-      //  val spatialRangeQuery  = new Envelope (-10,-6, 30, 50)
-      val temporalRangeQuery = (1399900000L, 1400000000L)
-      val eachQueryLoopTimes = 1
+    // query
+    val spatialRangeQuery = new Envelope(-8.682329739182336, -8.553892156181982,
+      41.16930767535641, 41.17336956864337)
+    //  val spatialRangeQuery  = new Envelope (-10,-6, 30, 50)
+    val temporalRangeQuery = (1399900000L, 1400000000L)
+    val eachQueryLoopTimes = 1
 
-      // execution
-      // testSpatialRangeQuery()
-      // testSpatialTemporalRangeQuery()
-      testSpatialRangeQueryUsingIndex()
-      sc.stop()
+    // execution
+    // testSpatialRangeQuery()
+    // testSpatialTemporalRangeQuery()
+    testSpatialRangeQueryUsingIndex()
+    sc.stop()
 
-      def testSpatialTemporalRangeQuery() {
-        println("In function testSpatialTemporalRangeQuery: ")
-          var t = nanoTime()
-          val taxiRDD = GeoJsonReader.readToGeometryRDD(sc, dataFile, allowTopologyInvalidGeometries, skipSyntaxInvalidGeometries)
-          taxiRDD.rawSpatialRDD.persist(StorageLevel.MEMORY_ONLY)
-          println(s"... Build LineStringRDD: ${(nanoTime() - t) * 1e-9} s.")
+    def testSpatialTemporalRangeQuery() {
+      println("In function testSpatialTemporalRangeQuery: ")
+      var t = nanoTime()
+      val taxiRDD = GeoJsonReader.readToGeometryRDD(sc, dataFile, allowTopologyInvalidGeometries, skipSyntaxInvalidGeometries)
+      taxiRDD.rawSpatialRDD.persist(StorageLevel.MEMORY_ONLY)
+      println(s"... Build LineStringRDD: ${(nanoTime() - t) * 1e-9} s.")
 
-          // println(taxiRDD.rawSpatialRDD.count())
+      // println(taxiRDD.rawSpatialRDD.count())
 
-          t = nanoTime()
-          val spatialQueryResult  = RangeQuery.SpatialRangeQuery(taxiRDD, spatialRangeQuery, true, false)
-          spatialQueryResult.take(1)
-          // println(spatialQueryResult.count())
-          println(s"spatial query: ${(nanoTime() - t) * 1e-9 } s.")
-          t = nanoTime()
-          val rddWithOtherAttributes = spatialQueryResult.rdd.map[String](f => f.getUserData.asInstanceOf[String])
-          rddWithOtherAttributes.filter(x => {
-              //      println(x)
-              val ts = x.split("\t")(7).toLong
-              //      println(ts)
-              ts <= temporalRangeQuery._2 && ts >= temporalRangeQuery._1
-              }).take(1)
+      t = nanoTime()
+      val spatialQueryResult = RangeQuery.SpatialRangeQuery(taxiRDD, spatialRangeQuery, true, false)
+      spatialQueryResult.take(1)
+      // println(spatialQueryResult.count())
+      println(s"spatial query: ${(nanoTime() - t) * 1e-9} s.")
+      t = nanoTime()
+      val rddWithOtherAttributes = spatialQueryResult.rdd.map[String](f => f.getUserData.asInstanceOf[String])
+      rddWithOtherAttributes.filter(x => {
+        //      println(x)
+        val ts = x.split("\t")(7).toLong
+        //      println(ts)
+        ts <= temporalRangeQuery._2 && ts >= temporalRangeQuery._1
+      }).take(1)
 
-        println(s"... temporal query: ${(nanoTime() - t) * 1e-9 } s.")
-      }
+      println(s"... temporal query: ${(nanoTime() - t) * 1e-9} s.")
+    }
 
     def testSpatialRangeQuery() {
       println("In function testSpatialRangeQuery: ")
-        var t = nanoTime()
-        val taxiRDD = GeoJsonReader.readToGeometryRDD(sc, dataFile, allowTopologyInvalidGeometries, skipSyntaxInvalidGeometries)
-        taxiRDD.rawSpatialRDD.persist(StorageLevel.MEMORY_ONLY)
-        println(s"... Build LineStringRDD: ${(nanoTime() - t) * 1e-9} s.")
+      var t = nanoTime()
+      val taxiRDD = GeoJsonReader.readToGeometryRDD(sc, dataFile, allowTopologyInvalidGeometries, skipSyntaxInvalidGeometries)
+      taxiRDD.rawSpatialRDD.persist(StorageLevel.MEMORY_ONLY)
+      println(s"... Build LineStringRDD: ${(nanoTime() - t) * 1e-9} s.")
 
-        for (i <- 1 to eachQueryLoopTimes) {
-          t = nanoTime()
-            val spatialQueryResult  = RangeQuery.SpatialRangeQuery(taxiRDD, spatialRangeQuery, true, false)
-            println(spatialQueryResult.count())
-            println(s"... Range query: ${(nanoTime() - t) * 1e-9} s.")
-        }
+      for (i <- 1 to eachQueryLoopTimes) {
+        t = nanoTime()
+        val spatialQueryResult = RangeQuery.SpatialRangeQuery(taxiRDD, spatialRangeQuery, true, false)
+        println(spatialQueryResult.count())
+        println(s"... Range query: ${(nanoTime() - t) * 1e-9} s.")
+      }
 
     }
 
     def testSpatialRangeQueryUsingIndex() {
       println("In function testSpatialRangeQueryUsingIndex: ")
-        var t = nanoTime()
-        val taxiRDD = GeoJsonReader.readToGeometryRDD(sc, dataFile, allowTopologyInvalidGeometries, skipSyntaxInvalidGeometries)
-        taxiRDD.rawSpatialRDD.persist(StorageLevel.MEMORY_ONLY)
-        println(s"... Build LineStringRDD: ${(nanoTime() - t) * 1e-9} s.")
+      var t = nanoTime()
+      val taxiRDD = GeoJsonReader.readToGeometryRDD(sc, dataFile, allowTopologyInvalidGeometries, skipSyntaxInvalidGeometries)
+      taxiRDD.rawSpatialRDD.persist(StorageLevel.MEMORY_ONLY)
+      println(s"... Build LineStringRDD: ${(nanoTime() - t) * 1e-9} s.")
 
-        t = nanoTime()
-        taxiRDD.buildIndex(indexType, false)
-        taxiRDD.indexedRawRDD.persist(StorageLevel.MEMORY_ONLY)
-        println(s"... Build RTree index: ${(nanoTime() - t) * 1e-9} s.")
+      t = nanoTime()
+      taxiRDD.buildIndex(indexType, false)
+      taxiRDD.indexedRawRDD.persist(StorageLevel.MEMORY_ONLY)
+      println(s"... Build RTree index: ${(nanoTime() - t) * 1e-9} s.")
 
-        t = nanoTime()
-        //for (i <- 1 to eachQueryLoopTimes) {
-          val result = RangeQuery.SpatialRangeQuery(taxiRDD, spatialRangeQuery, true, true)
-            result.take(1)
-            // println(resultSize)
-       // }
+      t = nanoTime()
+      //for (i <- 1 to eachQueryLoopTimes) {
+      val result = RangeQuery.SpatialRangeQuery(taxiRDD, spatialRangeQuery, true, true)
+      result.take(1)
+      // println(resultSize)
+      // }
       println(s"... spatial Range query with index: ${(nanoTime() - t) * 1e-9 / eachQueryLoopTimes} s.")
       t = nanoTime()
-        result.filter(x => {
-            //      println(x)
-            val ts = x.split("\t")(7).toLong
-            //      println(ts)
-            ts <= temporalRangeQuery._2 && ts >= temporalRangeQuery._1
-            }).take(1)
+      result.map[String](f => f.getUserData.asInstanceOf[String]).filter(x => {
+        //      println(x)
+        val ts = x.split("\t")(7).toLong
+        //      println(ts)
+        ts <= temporalRangeQuery._2 && ts >= temporalRangeQuery._1
+      }).take(1)
 
-      println(s"... temporal query: ${(nanoTime() - t) * 1e-9 } s.")
+      println(s"... temporal query: ${(nanoTime() - t) * 1e-9} s.")
     }
   }
 }
