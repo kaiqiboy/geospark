@@ -17,8 +17,8 @@ object GeoSparkRangeQuery {
     Logger.getLogger("org").setLevel(Level.WARN)
     Logger.getLogger("akka").setLevel(Level.WARN)
 
-    //    val conf = new SparkConf().setAppName("GeoSparkRangeQuery").setMaster("local[*]")
-    val conf = new SparkConf().setAppName("GeoSparkRangeQuery")
+    val conf = new SparkConf().setAppName("GeoSparkRangeQuery").setMaster("local[*]")
+    //val conf = new SparkConf().setAppName("GeoSparkRangeQuery")
     conf.set("spark.serializer", classOf[KryoSerializer].getName)
     conf.set("spark.kryo.registrator", classOf[GeoSparkKryoRegistrator].getName)
     val sc = new SparkContext(conf)
@@ -32,6 +32,9 @@ object GeoSparkRangeQuery {
     // query
     val spatialRangeQuery = new Envelope(-8.682329739182336, -8.553892156181982,
       41.16930767535641, 41.17336956864337)
+
+    val spatialRangeQueries = ReadQueryFile(args(1))
+
     //  val spatialRangeQuery  = new Envelope (-10,-6, 30, 50)
     val temporalRangeQuery = (1399900000L, 1400000000L)
     val eachQueryLoopTimes = 1
@@ -97,20 +100,15 @@ object GeoSparkRangeQuery {
       println(s"... Build RTree index: ${(nanoTime() - t) * 1e-9} s.")
 
       t = nanoTime()
-      //for (i <- 1 to eachQueryLoopTimes) {
-      val result = RangeQuery.SpatialRangeQuery(taxiRDD, spatialRangeQuery, true, true)
-      result.take(1)
-      // println(resultSize)
-      // }
-      println(s"... spatial Range query with index: ${(nanoTime() - t) * 1e-9 / eachQueryLoopTimes} s.")
-      t = nanoTime()
-      result.map[String](f => f.getUserData.asInstanceOf[String]).filter(x => {
-        //      println(x)
-        val ts = x.split("\t")(7).toLong
-        //      println(ts)
-        ts <= temporalRangeQuery._2 && ts >= temporalRangeQuery._1
-      }).take(1)
-
+      for (spatialRangeQuery <- spatialRangeQueries.take(5)) {
+        val resultS = RangeQuery.SpatialRangeQuery(taxiRDD, spatialRangeQuery, true, true)
+        val resultST = resultS.map[String](f => f.getUserData.asInstanceOf[String]).filter(x => {
+          val ts = x.split("\t")(7).toLong
+          ts <= temporalRangeQuery._2 && ts >= temporalRangeQuery._1
+        })
+        resultST.take(1)
+        println(resultST.count())
+      }
       println(s"... temporal query: ${(nanoTime() - t) * 1e-9} s.")
     }
   }
