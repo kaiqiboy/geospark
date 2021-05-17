@@ -17,8 +17,8 @@ object GeoSparkRangeQuery {
     Logger.getLogger("org").setLevel(Level.WARN)
     Logger.getLogger("akka").setLevel(Level.WARN)
 
-    val conf = new SparkConf().setAppName("GeoSparkRangeQuery").setMaster("local[*]")
-    //val conf = new SparkConf().setAppName("GeoSparkRangeQuery")
+//    val conf = new SparkConf().setAppName("GeoSparkRangeQuery").setMaster("local[*]")
+    val conf = new SparkConf().setAppName("GeoSparkRangeQuery")
     conf.set("spark.serializer", classOf[KryoSerializer].getName)
     conf.set("spark.kryo.registrator", classOf[GeoSparkKryoRegistrator].getName)
     val sc = new SparkContext(conf)
@@ -100,7 +100,7 @@ object GeoSparkRangeQuery {
       println(s"... Build RTree index: ${(nanoTime() - t) * 1e-9} s.")
 
       t = nanoTime()
-      for (spatialRangeQuery <- spatialRangeQueries.take(5)) {
+      for (spatialRangeQuery <- spatialRangeQueries) {
         val resultS = RangeQuery.SpatialRangeQuery(taxiRDD, spatialRangeQuery, true, true)
         val resultST = resultS.map[String](f => f.getUserData.asInstanceOf[String]).filter(x => {
           val ts = x.split("\t")(7).toLong
