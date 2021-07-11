@@ -35,7 +35,7 @@ object flowGeoSpark {
     val grids = genGrids(sQuery, sSize)
     val stGrids = genSTGrids(grids, (tQuery(0), tQuery(1)), tSplit)
 
-    //    println(stGrids.length)
+        println(s"${stGrids.length} st grids.")
 
     val pointDf = readPoints(dataFile)
 
