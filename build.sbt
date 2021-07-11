@@ -11,6 +11,7 @@ libraryDependencies += "org.apache.spark" %% "spark-sql" % "3.0.0"
 resolvers += "Sonatype OSS Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots"
 
 libraryDependencies += "org.datasyslab" % "geospark" % "1.3.2-SNAPSHOT"
+libraryDependencies += "org.datasyslab" % "geospark-sql_3.0" % "1.3.2-SNAPSHOT"
 
 // Assembly settings
 // fix "deduplicate: different file contents found" error
