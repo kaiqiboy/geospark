@@ -64,7 +64,7 @@ object flowGeoSpark {
 
     val pointRDD = Adapter.toSpatialRdd(pointDf, "location", List("timestamp"))
     pointRDD.analyze()
-    pointRDD.spatialPartitioning(GridType.QUADTREE, sSize* sSize)
+    //    pointRDD.spatialPartitioning(GridType.QUADTREE, sSize* sSize)
     pointRDD.buildIndex(IndexType.RTREE, false)
     var res = new Array[(Array[Double], Array[Long], Int)](0)
 
