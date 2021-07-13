@@ -39,12 +39,13 @@ object flowGeoSpark {
 
     val pointDf = readPoints(dataFile)
 
-//    pointDf.show(5)
-//    pointDf.printSchema()
+    //    pointDf.show(5)
+    //    pointDf.printSchema()
 
-    pointDf.createOrReplaceTempView("points")
 
     /** sql version */
+    //    pointDf.createOrReplaceTempView("points")
+
     //    var res = new Array[(Array[Double], Array[Long], Int)](0)
     //
     //    for (query <- stGrids) {
@@ -63,7 +64,7 @@ object flowGeoSpark {
 
     val pointRDD = Adapter.toSpatialRdd(pointDf, "location", List("timestamp"))
     pointRDD.analyze()
-    pointRDD.spatialPartitioning(GridType.QUADTREE, sSize)
+    pointRDD.spatialPartitioning(GridType.QUADTREE, sSize* sSize)
     pointRDD.buildIndex(IndexType.RTREE, false)
     var res = new Array[(Array[Double], Array[Long], Int)](0)
 
