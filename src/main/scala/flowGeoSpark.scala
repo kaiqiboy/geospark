@@ -35,29 +35,48 @@ object flowGeoSpark {
     val grids = genGrids(sQuery, sSize)
     val stGrids = genSTGrids(grids, (tQuery(0), tQuery(1)), tSplit)
 
-        println(s"${stGrids.length} st grids.")
+    println(s"${stGrids.length} st grids.")
 
     val pointDf = readPoints(dataFile)
 
-    //    pointDf.show(5)
-    //    pointDf.printSchema()
+//    pointDf.show(5)
+//    pointDf.printSchema()
 
     pointDf.createOrReplaceTempView("points")
 
+    /** sql version */
+    //    var res = new Array[(Array[Double], Array[Long], Int)](0)
+    //
+    //    for (query <- stGrids) {
+    //      val tQuery = (query._2(0), query._2(1))
+    //      val rangeQuery =
+    //        s"SELECT * FROM points " +
+    //          s"WHERE ST_Contains (ST_PolygonFromEnvelope(${query._1(0)},${query._1(1)},${query._1(2)},${query._1(3)}), location) " +
+    //          s"AND timestamp >= ${tQuery._1} " +
+    //          s"AND timestamp <= ${tQuery._2}"
+    //
+    //      val resDf = spark.sql(rangeQuery)
+    //      //      resDf.show(5)
+    //
+    //      res = res :+ (query._1, query._2, resDf.count.toInt)
+    //    }
+
+    val pointRDD = Adapter.toSpatialRdd(pointDf, "location", List("timestamp"))
+    pointRDD.analyze()
+    pointRDD.spatialPartitioning(GridType.QUADTREE, sSize)
+    pointRDD.buildIndex(IndexType.RTREE, false)
     var res = new Array[(Array[Double], Array[Long], Int)](0)
 
     for (query <- stGrids) {
       val tQuery = (query._2(0), query._2(1))
-      val rangeQuery =
-        s"SELECT * FROM points " +
-          s"WHERE ST_Contains (ST_PolygonFromEnvelope(${query._1(0)},${query._1(1)},${query._1(2)},${query._1(3)}), location) " +
-          s"AND timestamp >= ${tQuery._1} " +
-          s"AND timestamp <= ${tQuery._2}"
-
-      val resDf = spark.sql(rangeQuery)
-      //      resDf.show(5)
-
-      res = res :+ (query._1, query._2, resDf.count.toInt)
+      val sQuery = new Envelope(query._1(0), query._1(2), query._1(1), query._1(3))
+      val resultS = RangeQuery.SpatialRangeQuery(pointRDD, sQuery, true, true)
+      val resultST = resultS.map[String](f => f.getUserData.asInstanceOf[String]).filter(x => {
+        val ts = x.toLong
+        ts <= tQuery._2 && ts >= tQuery._1
+      })
+      val c = resultST.count
+      res = res :+ (query._1, query._2, c.toInt)
     }
 
     //    /** rdd version */
