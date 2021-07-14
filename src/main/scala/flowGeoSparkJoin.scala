@@ -1,16 +1,14 @@
-import com.vividsolutions.jts.geom.{Envelope, Geometry}
-import org.apache.spark.{SparkConf, SparkContext}
+import com.vividsolutions.jts.geom.{Coordinate, Envelope, Geometry, GeometryFactory, Polygon}
 import org.apache.spark.serializer.KryoSerializer
-import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.apache.spark.sql.geosparksql.expressions.ST_PointFromText
-import org.datasyslab.geospark.enums.{FileDataSplitter, GridType, IndexType}
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.datasyslab.geospark.enums.{GridType, IndexType}
 import org.datasyslab.geospark.serde.GeoSparkKryoRegistrator
-import org.datasyslab.geospark.spatialOperator.RangeQuery
-import org.datasyslab.geospark.spatialRDD.{PointRDD, SpatialRDD}
+import org.datasyslab.geospark.spatialOperator.{JoinQuery, RangeQuery}
+import org.datasyslab.geospark.spatialRDD.{PolygonRDD, SpatialRDD}
 import org.datasyslab.geosparksql.utils.{Adapter, GeoSparkSQLRegistrator}
 import utils.Config
 
-object flowGeoSpark {
+object flowGeoSparkJoin extends {
   def main(args: Array[String]): Unit = {
     val spark = SparkSession.builder()
       .master(Config.get("master")) // Delete this if run in cluster mode
@@ -39,52 +37,69 @@ object flowGeoSpark {
 
     val pointDf = readPoints(dataFile)
 
-    //    pointDf.show(5)
-    //    pointDf.printSchema()
-
-    /** sql version */
-    //    pointDf.createOrReplaceTempView("points")
-
-    //    var res = new Array[(Array[Double], Array[Long], Int)](0)
-    //
-    //    for (query <- stGrids) {
-    //      val tQuery = (query._2(0), query._2(1))
-    //      val rangeQuery =
-    //        s"SELECT * FROM points " +
-    //          s"WHERE ST_Contains (ST_PolygonFromEnvelope(${query._1(0)},${query._1(1)},${query._1(2)},${query._1(3)}), location) " +
-    //          s"AND timestamp >= ${tQuery._1} " +
-    //          s"AND timestamp <= ${tQuery._2}"
-    //
-    //      val resDf = spark.sql(rangeQuery)
-    //      //      resDf.show(5)
-    //
-    //      res = res :+ (query._1, query._2, resDf.count.toInt)
-    //    }
-
     val pointRDD = Adapter.toSpatialRdd(pointDf, "location", List("timestamp"))
     pointRDD.analyze()
-    //    pointRDD.spatialPartitioning(GridType.QUADTREE, sSize* sSize)
-    pointRDD.buildIndex(IndexType.RTREE, false)
-    var res = new Array[(Array[Double], Array[Long], Int)](0)
+    pointRDD.spatialPartitioning(GridType.QUADTREE, sSize * sSize)
+    pointRDD.buildIndex(IndexType.RTREE, true)
 
-    for (query <- stGrids) {
-      val tQuery = (query._2(0), query._2(1))
-      val sQuery = new Envelope(query._1(0), query._1(2), query._1(1), query._1(3))
-      val resultS = RangeQuery.SpatialRangeQuery(pointRDD, sQuery, true, true)
-      val resultST = resultS.map[String](f => f.getUserData.asInstanceOf[String])
-        .filter(x => {
-          val ts = x.toLong
-          ts <= tQuery._2 && ts >= tQuery._1
-        })
-      val c = resultST.count
-      res = res :+ (query._1, query._2, c.toInt)
+    val geometryFactory = new GeometryFactory()
+
+    val polygons = stGrids.map(query => {
+      val coordinates = new Array[Coordinate](5)
+      coordinates(0) = new Coordinate(query._1(0), query._1(1))
+      coordinates(1) = new Coordinate(query._1(0), query._1(3))
+      coordinates(2) = new Coordinate(query._1(2), query._1(3))
+      coordinates(3) = new Coordinate(query._1(2), query._1(1))
+      coordinates(4) = coordinates(0)
+      geometryFactory.createPolygon(coordinates)
     }
+    )
+    val queries = (polygons zip stGrids.map(_._2)).map(x => {
+      val polygon = x._1
+      polygon.setUserData(x._2)
+      polygon
+    })
+    val queryRDD = new PolygonRDD(sc.parallelize(queries))
+    queryRDD.spatialPartitioning(pointRDD.getPartitioner)
 
-    res.foreach(x => println(x._1.deep, x._2.mkString("Array(", ", ", ")"), x._3))
-    println(s"Total Points: ${res.map(_._3).sum}")
+    val res = JoinQuery.SpatialJoinQuery(pointRDD,
+      queryRDD, true, true)
+      .map(x => {
+        val tQuery = x._1.getUserData.asInstanceOf[Array[Long]]
+        (x._1, x._2.toArray.filter(p => {
+          val ts = p.asInstanceOf[Geometry].getUserData.asInstanceOf[String].toLong
+          ts <= tQuery(1) && ts >= tQuery(0)
+        }))
+      })
+
+    res.map(x => {
+      (x._1.getEnvelope, x._1.getUserData.asInstanceOf[Array[Long]], x._2.size)
+    })
+      .foreach(x => {
+        val coords = x._1.getCoordinates
+        println(coords(0).x, coords(0).y, coords(2).x, coords(2).y,
+          x._2(0), x._2(1),
+          x._3)
+      })
+
+    println(s"Total points: ${res.map(_._2.size).reduce(_ + _)}")
+    //    for (query <- stGrids) {
+    //      val tQuery = (query._2(0), query._2(1))
+    //      val sQuery = new Envelope(query._1(0), query._1(2), query._1(1), query._1(3))
+    //    }
+    //    val resultS = RangeQuery.SpatialRangeQuery(pointRDD, sQuery, true, true)
+    //    val resultST = resultS.map[String](f => f.getUserData.asInstanceOf[String]).filter(x => {
+    //      val ts = x.toLong
+    //      ts <= tQuery._2 && ts >= tQuery._1
+    //    })
+    //    val c = resultST.count
+    //    res = res :+ (query._1, query._2, c.toInt)
+    //  }
+    //
+    //  res.foreach(x => println(x._1.deep, x._2.mkString("Array(", ", ", ")"), x._3))
+    //  println(s"Total Points: ${res.map(_._3).sum}")
 
   }
-
 
   def genGrids(range: Array[Double], size: Int): Array[Array[Double]] = {
     val lonMin = range(0)
