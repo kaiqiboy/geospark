@@ -38,9 +38,9 @@ object flowGeoSparkJoin extends {
     val pointDf = readPoints(dataFile)
 
     val pointRDD = Adapter.toSpatialRdd(pointDf, "location", List("timestamp"))
-    pointRDD.analyze()
-    pointRDD.spatialPartitioning(GridType.QUADTREE, sSize * sSize)
-    pointRDD.buildIndex(IndexType.RTREE, true)
+    //    pointRDD.analyze()
+    //    pointRDD.spatialPartitioning(GridType.QUADTREE, sSize * sSize)
+    //    pointRDD.buildIndex(IndexType.RTREE, true)
 
     val geometryFactory = new GeometryFactory()
 
@@ -60,7 +60,10 @@ object flowGeoSparkJoin extends {
       polygon
     })
     val queryRDD = new PolygonRDD(sc.parallelize(queries))
-    queryRDD.spatialPartitioning(pointRDD.getPartitioner)
+    //    queryRDD.spatialPartitioning(pointRDD.getPartitioner)
+    queryRDD.analyze()
+    queryRDD.spatialPartitioning(GridType.QUADTREE, sSize * sSize)
+    pointRDD.spatialPartitioning(queryRDD.getPartitioner)
 
     val res = JoinQuery.SpatialJoinQuery(pointRDD,
       queryRDD, true, true)
