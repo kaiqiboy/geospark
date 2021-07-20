@@ -65,12 +65,14 @@ object flowGeoSpark {
     pointRDD.analyze()
     //    pointRDD.spatialPartitioning(GridType.QUADTREE, sSize* sSize)
     pointRDD.buildIndex(IndexType.RTREE, false)
+    pointRDD.indexedRawRDD.rdd.cache()
     var res = new Array[(Array[Double], Array[Long], Int)](0)
 
     for (query <- stGrids) {
       val tQuery = (query._2(0), query._2(1))
       val sQuery = new Envelope(query._1(0), query._1(2), query._1(1), query._1(3))
-      val resultS = RangeQuery.SpatialRangeQuery(pointRDD, sQuery, true, true)
+      val resultS = RangeQuery.SpatialRangeQuery(pointRDD, sQuery,
+        true, true)
       val resultST = resultS.map[String](f => f.getUserData.asInstanceOf[String])
         .filter(x => {
           val ts = x.toLong
