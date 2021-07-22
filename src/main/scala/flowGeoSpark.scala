@@ -85,6 +85,8 @@ object flowGeoSpark {
     res.foreach(x => println(x._1.deep, x._2.mkString("Array(", ", ", ")"), x._3))
     println(s"Total Points: ${res.map(_._3).sum}")
 
+    sc.stop()
+
   }
 
 
