@@ -53,11 +53,8 @@ object SpeedGeoSpark {
     var res = new Array[(Array[Double], Array[Long], Double)](0)
 
     for (query <- stGrids) {
-      val tQuery = (query._2(0), query._2(1))
       val sQuery = new Envelope(query._1(0), query._1(2), query._1(1), query._1(3))
-      val resultS = RangeQuery.SpatialRangeQuery(trajRDD, sQuery,
-        true, true)
-      //      val resultS = trajRDD.rawSpatialRDD
+      val resultS = RangeQuery.SpatialRangeQuery(trajRDD, sQuery, true, true)
       val combinedRDD = resultS.map[(Geometry, String)](f => (f, f.getUserData.asInstanceOf[String]))
         .rdd.map {
         case (geoms, tsString) => {
@@ -67,65 +64,35 @@ object SpeedGeoSpark {
           Trajectory(points zip timestamps, id)
         }
       }
-
-      //      val countRDD = combinedRDD.map(x => {
-      //        x.points.zipWithIndex.count {
-      //          case ((s, t), _) => {
-      //            s._1 >= sQuery.getMinX && s._2 >= sQuery.getMinY && s._1 <= sQuery.getMaxX && s._2 <= sQuery.getMaxY &&
-      //              t >= tQuery._1 && t <= tQuery._2
-      //          }
-      //        }
-      //      })
-      //      println(countRDD.sum())
-
-      val results = combinedRDD.map(x => {
-        val pointsInside = x.points.zipWithIndex.filter {
-          case ((s, t), _) => {
-            s._1 >= sQuery.getMinX && s._2 >= sQuery.getMinY && s._1 <= sQuery.getMaxX && s._2 <= sQuery.getMaxY &&
-              t >= tQuery._1 && t <= tQuery._2
-          }
-        }
-        if (pointsInside.length < 2) None
-        else {
-          val distance = greatCircleDistance(pointsInside.last._1._1, pointsInside.head._1._1)
-          val duration = pointsInside.last._1._2 - pointsInside.head._1._2
-          Some(distance / duration)
-        }
-      })
-
-      val validRDD = results.filter(_.isDefined).map(_.get)
-      val avgSpeed = if (validRDD.count > 0) validRDD.filter(_ > 0).reduce(_ + _) / validRDD.count else 0
-      res = res :+ (query._1, query._2, avgSpeed)
+      for (tQuery <- query._2) {
+        val avgSpeed = calSpeed(combinedRDD, sQuery, (tQuery(0), tQuery(1)))
+        res = res :+ (query._1, tQuery, avgSpeed)
+      }
     }
-    //      val resultST = resultS.map[(Geometry, String)](f => (f, f.getUserData.asInstanceOf[String]))
-    //        .filter { case (_, x) => {
-    //          val ts = x.split("\\[").last.dropRight(1).split(", ").map(_.toLong)
-    //          val instants = ts.zipWithIndex.filter(t => t._1 <= tQuery._2 && t._1 >= tQuery._1)
-    //          !instants.isEmpty
-    //        }
-    //        }.map { case (geom, x) => {
-    //        val ts = x.split("\\[").last.dropRight(1).split(", ").map(_.toLong)
-    //        val stPointsWithIndex = (geom.getCoordinates zip ts).zipWithIndex
-    //        val valid = stPointsWithIndex.filter {
-    //          case ((s, t), _) => sQuery.contains(s) && t <= tQuery._2 && t >= tQuery._1
-    //        }
-    //        if (valid.isEmpty) None
-    //        else {
-    //          val duration = valid.last._1._2 - valid.head._1._2-
-    //          val distance = greatCircleDistance(valid.last._1._1, valid.head._1._1)
-    //          Some(distance / duration)
-    //        }
-    //      }
-    //      }
-    //        .filter(x => x.asInstanceOf[Option[Double]].isDefined)
-    //      val c = resultST.collect.toArray.map(x => x.asInstanceOf[Option[Double]].get).sum / resultST.count
-    //      res = res :+ (query._1, query._2, c)
 
     res.foreach(x => println(x._1.deep, x._2.mkString("Array(", ", ", ")"), x._3))
-
     sc.stop()
   }
 
+  def calSpeed(rdd: RDD[Trajectory], sQuery: Envelope, tQuery: (Long, Long)): Double = {
+    val results = rdd.map(x => {
+      val pointsInside = x.points.zipWithIndex.filter {
+        case ((s, t), _) => {
+          s._1 >= sQuery.getMinX && s._2 >= sQuery.getMinY && s._1 <= sQuery.getMaxX && s._2 <= sQuery.getMaxY &&
+            t >= tQuery._1 && t <= tQuery._2
+        }
+      }
+      if (pointsInside.length < 2) None
+      else {
+        val distance = greatCircleDistance(pointsInside.last._1._1, pointsInside.head._1._1)
+        val duration = pointsInside.last._1._2 - pointsInside.head._1._2
+        Some(distance / duration)
+      }
+    })
+
+    val validRDD = results.filter(_.isDefined).map(_.get)
+    if (validRDD.count > 0) validRDD.filter(_ > 0).reduce(_ + _) / validRDD.count else 0
+  }
 
   def readTraj(file: String): DataFrame = {
     val spark = SparkSession.builder().getOrCreate()
@@ -180,9 +147,9 @@ object SpeedGeoSpark {
     lons.flatMap(x => lats.map(y => Array(x(0), y(0), x(1), y(1))))
   }
 
-  def genSTGrids(grids: Array[Array[Double]], tRange: (Long, Long), tSplit: Int): Array[(Array[Double], Array[Long])] = {
+  def genSTGrids(grids: Array[Array[Double]], tRange: (Long, Long), tSplit: Int): Array[(Array[Double], Array[Array[Long]])] = {
     val tSlots = ((tRange._1 until tRange._2 by tSplit.toLong).toArray :+ tRange._2).sliding(2).toArray
-    grids.flatMap(grid => tSlots.map(t => (grid, t)))
+    grids.map(grid => (grid, tSlots))
   }
 
   //  def greatCircleDistance(c1: Coordinate, c2: Coordinate): Double = {
