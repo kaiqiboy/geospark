@@ -22,7 +22,7 @@ object TrajRangeQuery {
   def main(args: Array[String]): Unit = {
     val dataFile = args(0)
     val queryFile = args(1)
-
+    val numPartitions = args(2).toInt
     val f = Source.fromFile(queryFile)
     val queries = f.getLines().toArray.map(line => {
       val r = line.split(" ")
@@ -41,12 +41,12 @@ object TrajRangeQuery {
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
 
-    val trajDf = readTraj(dataFile)
+    val trajDf = readTraj(dataFile, numPartitions)
     val trajRDD = Adapter.toSpatialRdd(trajDf, "linestring")
     trajRDD.analyze()
     trajRDD.buildIndex(IndexType.RTREE, false)
     trajRDD.indexedRawRDD.rdd.cache()
-    println(trajRDD.rawSpatialRDD.count())
+    println(trajRDD.indexedRawRDD.count())
     println(s"Data loading ${(nanoTime - t) * 1e-9} s" )
     t = nanoTime
     for (query <- queries) {
@@ -69,7 +69,7 @@ object TrajRangeQuery {
     sc.stop()
     }
 
-    def readTraj(file: String): DataFrame = {
+    def readTraj(file: String, numPartitions: Int): DataFrame = {
       val spark = SparkSession.builder().getOrCreate()
       val readDs = spark.read.parquet(file)
       import spark.implicits._
@@ -87,6 +87,6 @@ object TrajRangeQuery {
         "FROM input"
 
       val lineStringDF = spark.sql(sqlQuery)
-      lineStringDF
+      lineStringDF.repartition(numPartitions)
     }
   }
