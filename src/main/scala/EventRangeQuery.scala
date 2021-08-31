@@ -42,7 +42,7 @@ object EventRangeQuery {
     pointRDD.analyze()
     pointRDD.buildIndex(IndexType.RTREE, false)
     pointRDD.indexedRawRDD.rdd.cache()
-    println(pointRDD.indexedRawRDD.count())
+    println(pointRDD.rawSpatialRDD.count())
     println(s"Data loading ${(nanoTime - t) * 1e-9} s")
     t = nanoTime
     for (query <- queries) {
