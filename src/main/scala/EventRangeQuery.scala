@@ -38,7 +38,6 @@ object EventRangeQuery {
     sc.setLogLevel("ERROR")
 
     val pointDf = readEvent(dataFile, numPartitions)
-    pointDf.show(5)
     val pointRDD = Adapter.toSpatialRdd(pointDf, "location")
     pointRDD.analyze()
     pointRDD.buildIndex(IndexType.RTREE, false)
