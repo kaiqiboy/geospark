@@ -38,6 +38,7 @@ object EventRangeQuery {
     sc.setLogLevel("ERROR")
 
     val pointDf = readEvent(dataFile, numPartitions)
+    pointDf.show(5)
     val pointRDD = Adapter.toSpatialRdd(pointDf, "location")
     pointRDD.analyze()
     pointRDD.buildIndex(IndexType.RTREE, false)
@@ -51,12 +52,12 @@ object EventRangeQuery {
       val combinedRDD = resultS.map[(Geometry, String)](f => (f, f.getUserData.asInstanceOf[String]))
         .map {
           case (geoms, tsString) =>
-            val timestamps = tsString.split("\t").last.split(",").map(_.toLong)
-            val id = tsString.split("\t")(0)
-            (geoms, timestamps, id)
+            val timestamp = tsString.split("\t").head.toLong
+            val id = tsString.split("\t")(1)
+            (geoms, timestamp, id)
         }.rdd
         .filter {
-          case (_, timestamps, _) => query._2(0) <= timestamps.last && query._2(1) >= timestamps.head
+          case (_, timestamp, _) => query._2(0) <= timestamp && query._2(1) >= timestamp
         }
       println(combinedRDD.count)
     }
