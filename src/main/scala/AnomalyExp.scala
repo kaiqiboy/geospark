@@ -12,23 +12,19 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import scala.io.Source
 
-object EventRangeQuery {
+object AnomalyExp {
   case class E2(id: String, lon: Double, lat: Double, t: Long)
 
   def main(args: Array[String]): Unit = {
     val dataFile = args(0)
     val queryFile = args(1)
     val numPartitions = args(2).toInt
+    val threshold = args(3).split(",").map(_.toLong)
     val f = Source.fromFile(queryFile)
-    val queries = f.getLines().toArray.map(line => {
-      val r = line.split(" ")
-      (r.take(4).map(_.toDouble), r.takeRight(2).map(_.toLong))
-    })
 
-    var t = nanoTime
     val spark = SparkSession.builder()
       .master(Config.get("master"))
-      .appName("GeoSparkRangeQueryTraj")
+      .appName("GeoSparkAnomalyExp")
       .config("spark.serializer", classOf[KryoSerializer].getName)
       .config("spark.kryo.registrator", classOf[GeoSparkKryoRegistrator].getName)
       .getOrCreate()
@@ -43,23 +39,23 @@ object EventRangeQuery {
     pointRDD.buildIndex(IndexType.RTREE, false)
     pointRDD.indexedRawRDD.rdd.cache()
     println(pointRDD.rawSpatialRDD.count())
-    println(s"Data loading ${(nanoTime - t) * 1e-9} s")
-    t = nanoTime
-    for (query <- queries) {
-      val sQuery = new Envelope(query._1(0), query._1(2), query._1(1), query._1(3))
-      val resultS = RangeQuery.SpatialRangeQuery(pointRDD, sQuery, true, true)
-      val combinedRDD = resultS.map[(Geometry, String)](f => (f, f.getUserData.asInstanceOf[String]))
-        .map {
-          case (geoms, tsString) =>
-            val timestamp = tsString.split("\t").head.toLong
-            val id = tsString.split("\t")(1)
-            (geoms, timestamp, id)
-        }.rdd
-        .filter {
-          case (_, timestamp, _) => query._2(0) <= timestamp && query._2(1) >= timestamp
-        }
-      println(combinedRDD.count)
-    }
+    val t = nanoTime
+
+    val condition = if (threshold(0) > threshold(1)) (x: Int) => x >= threshold(0) || x < threshold(1)
+    else (x: Int) => x >= threshold(0) && x < threshold(1)
+
+    val combinedRDD = pointRDD.rawSpatialRDD.map[(Geometry, String)](f => (f, f.getUserData.asInstanceOf[String]))
+      .map {
+        case (geoms, tsString) =>
+          val timestamp = tsString.split("\t").head.toLong
+          (geoms, timestamp)
+      }.rdd
+      .filter {
+        case (_, timestamp) => condition(getHour(timestamp))
+      }
+      .map(x => (longToWeek(x._2), 1))
+      .reduceByKey(_+_)
+    println(combinedRDD.collect.toMap)
     println(s"Range querying ${(nanoTime - t) * 1e-9} s")
 
     sc.stop()
@@ -82,5 +78,18 @@ object EventRangeQuery {
     pointDF.repartition(numPartitions)
   }
 
+  def longToWeek(t: Long): Int = {
+    val d = new Date(t * 1000)
+    val formatter = new SimpleDateFormat("w")
+    val week = Integer.parseInt(formatter.format(d))
+    week
+  }
+  def getHour(t: Long): Int =
+    timeLong2String(t).split(" ")(1).split(":")(0).toInt
 
+  def timeLong2String(tm: Long): String = {
+    val fm = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+    val tim = fm.format(new Date(tm * 1000))
+    tim
+  }
 }
