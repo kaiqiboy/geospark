@@ -17,10 +17,8 @@ object AnomalyExp {
 
   def main(args: Array[String]): Unit = {
     val dataFile = args(0)
-    val queryFile = args(1)
-    val numPartitions = args(2).toInt
-    val threshold = args(3).split(",").map(_.toLong)
-    val f = Source.fromFile(queryFile)
+    val numPartitions = args(1).toInt
+    val threshold = args(2).split(",").map(_.toLong)
 
     val spark = SparkSession.builder()
       .master(Config.get("master"))
