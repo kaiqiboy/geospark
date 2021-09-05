@@ -38,7 +38,9 @@ object AvgSpeedExtraction {
           val length = coords.sliding(2).map(x => greatCircleDistance(x(0), x(1))).sum
           length / (timestamps.last - timestamps.head) * 3.6
       }
-    println(combinedRDD.collect)
+    println(combinedRDD.take(5))
+    println(s"Avg speed ${(nanoTime - t) * 1e-9} s" )
+
     sc.stop()
   }
 
