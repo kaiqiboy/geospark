@@ -1,5 +1,5 @@
 import TrajRangeQuery.readTraj
-import com.vividsolutions.jts.geom.{Envelope, Geometry}
+import com.vividsolutions.jts.geom.{Envelope, Geometry, LineString, Point}
 import org.apache.spark.serializer.KryoSerializer
 import org.apache.spark.sql.SparkSession
 import org.datasyslab.geospark.enums.IndexType
@@ -7,20 +7,22 @@ import org.datasyslab.geospark.serde.GeoSparkKryoRegistrator
 import org.datasyslab.geospark.spatialOperator.RangeQuery
 import org.datasyslab.geosparksql.utils.{Adapter, GeoSparkSQLRegistrator}
 import utils.Config
-import scala.collection.JavaConverters._
 
 import java.lang.System.nanoTime
+import scala.collection.JavaConverters._
 import scala.io.Source
 import scala.math.{abs, acos, cos, sin}
 
-object AvgSpeedExtraction {
+object StayPointExtraction {
   def main(args: Array[String]): Unit = {
     val dataFile = args(0)
     val queryFile = args(1)
+    val maxDist = args(2).toDouble
+    val minTime = args(3).toInt
 
     val spark = SparkSession.builder()
       .master(Config.get("master"))
-      .appName("GeoSparkAvgSpeed")
+      .appName("GeoSparkStayPoint")
       .config("spark.serializer", classOf[KryoSerializer].getName)
       .config("spark.kryo.registrator", classOf[GeoSparkKryoRegistrator].getName)
       .getOrCreate()
@@ -52,15 +54,33 @@ object AvgSpeedExtraction {
         .filter { case (_, timestamps, _) =>
           timestamps.head < end && timestamps.last >= start
         }.map { case (geoms, timestamps, id) =>
-        val coords = geoms.getCoordinates.map(x => (x.x, x.y))
-        val length = coords.sliding(2).map(x => greatCircleDistance(x(0), x(1))).sum
-        (id, length / (timestamps.last - timestamps.head) * 3.6)
+        (id, findStayPoint(geoms.asInstanceOf[LineString], timestamps, maxDist, minTime))
       }
       println(combinedRDD.collect.asScala.toArray.take(5).deep)
       spark.catalog.clearCache()
     }
-    println(s"Avg speed ${(nanoTime - t) * 1e-9} s")
+    println(s"Stay point ${(nanoTime - t) * 1e-9} s")
     sc.stop()
+  }
+
+  def findStayPoint(geoms: LineString, timestamps: Array[Long], maxDist: Double, minTime: Int): Array[(Double,Double)] = {
+    val points = geoms.getCoordinates.map(x => (x.x, x.y))
+    if (points.length < 2) return new Array[(Double,Double)](0)
+    val entries = (points zip timestamps).toIterator
+    var anchor = entries.next
+    var res = new Array[(Double, Double)](0)
+    var tmp = new Array[((Double, Double), Long)](0)
+    while (entries.hasNext) {
+      val candidate = entries.next
+      if (greatCircleDistance((candidate._1._1, candidate._1._2), (anchor._1._1, anchor._1._2)) < maxDist) tmp = tmp :+ candidate
+      else {
+        if (tmp.length > 0 && tmp.last._2 - anchor._2 > minTime)
+          res = res :+ anchor._1
+        anchor = candidate
+        tmp = new Array[((Double, Double), Long)](0)
+      }
+    }
+    res
   }
 
   def greatCircleDistance(p1: (Double, Double), p2: (Double, Double)): Double = {
