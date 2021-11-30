@@ -11,14 +11,16 @@ import java.lang.System.nanoTime
 import java.text.SimpleDateFormat
 import java.util.Date
 import scala.io.Source
+import scala.collection.JavaConverters._
 
 object AnomalyExp {
-  case class E2(id: String, lon: Double, lat: Double, t: Long)
+  case class E(shape: String, timeStamp: Array[Long], v: Option[String], d: String)
 
   def main(args: Array[String]): Unit = {
     val dataFile = args(0)
     val numPartitions = args(1).toInt
-    val threshold = args(2).split(",").map(_.toLong)
+    val queryFile = args(2)
+    val threshold = args(3).split(",").map(_.toLong)
 
     val spark = SparkSession.builder()
       .master(Config.get("master"))
@@ -30,49 +32,63 @@ object AnomalyExp {
     GeoSparkSQLRegistrator.registerAll(spark)
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
-
-    val pointDf = readEvent(dataFile, numPartitions)
-    val pointRDD = Adapter.toSpatialRdd(pointDf, "location")
-    pointRDD.analyze()
-    pointRDD.buildIndex(IndexType.RTREE, false)
-    pointRDD.indexedRawRDD.rdd.cache()
-    println(pointRDD.rawSpatialRDD.count())
-    val t = nanoTime
-
     val condition = if (threshold(0) > threshold(1)) (x: Int) => x >= threshold(0) || x < threshold(1)
     else (x: Int) => x >= threshold(0) && x < threshold(1)
 
-    val combinedRDD = pointRDD.rawSpatialRDD.map[(Geometry, String)](f => (f, f.getUserData.asInstanceOf[String]))
-      .map {
-        case (geoms, tsString) =>
-          val timestamp = tsString.split("\t").head.toLong
-          (geoms, timestamp)
-      }.rdd
-      .filter {
-        case (_, timestamp) => condition(getHour(timestamp))
-      }
-      .map(x => (longToWeek(x._2), 1))
-      .reduceByKey(_+_)
-    println(combinedRDD.collect.toMap)
-    println(s"Range querying ${(nanoTime - t) * 1e-9} s")
+    val f = Source.fromFile(queryFile)
+    val queries = f.getLines().toArray.map(_.split(" "))
+    val t = nanoTime
+    for (q <- queries) {
+      val pointDf = readEvent(dataFile, numPartitions)
+      val pointRDD = Adapter.toSpatialRdd(pointDf, "location")
+      pointRDD.analyze()
+      pointRDD.buildIndex(IndexType.RTREE, false)
+      val query = q.map(_.toDouble)
+      val sQuery = new Envelope(query(0), query(2), query(1), query(3))
+      val start = q(4).toLong
+      val end = q(5).toLong
+      val resultS = RangeQuery.SpatialRangeQuery(pointRDD, sQuery, true, true)
 
+      val combinedRDD = resultS.map[(Geometry, String)](f => (f, f.getUserData.asInstanceOf[String]))
+        .map {
+          case (geoms, tsString) =>
+            val timestamp = tsString.split("\t").head.toLong
+            val id = tsString.split("\t").head
+            (geoms, timestamp, id)
+        }.filter { case (_, timestamp, _) =>
+        timestamp < end && timestamp >= start
+      }.filter {
+        case (_, timestamp, _) => condition(getHour(timestamp))
+      }
+        .map(_._2)
+      println(combinedRDD.collect.asScala.toArray.take(5).deep)
+      spark.catalog.clearCache()
+    }
+    println(s"Anomaly ${(nanoTime - t) * 1e-9} s")
     sc.stop()
   }
 
   def readEvent(file: String, numPartitions: Int): DataFrame = {
     val spark = SparkSession.builder().getOrCreate()
     val readDs = spark.read.parquet(file)
+    //    readDs.show(5)
+    //    readDs.printSchema()
     import spark.implicits._
-    val pointRDD = readDs.as[E2].rdd.map(e => {
-      val coord = s"${e.lon},${e.lat}"
-      (coord, e.id, e.t)
+    val pointRDD = readDs.as[E].rdd.map(e => {
+      val content = ("""\([^]]+\)""".r findAllIn e.shape).next.drop(1).dropRight(1).split(" ")
+      val coord = s"${content(0)},${content(1)}"
+      (coord, e.d, e.timeStamp(0))
     })
     val df = pointRDD.toDF("coord", "id", "t")
+    //    df.show(5)
+    //    df.printSchema()
     df.createOrReplaceTempView("input")
     val sqlQuery = "SELECT ST_PointFromText(input.coord, ',') AS location, " +
       "CAST(input.t AS STRING) AS timestamp, " +
       "input.id AS id FROM input"
     val pointDF = spark.sql(sqlQuery)
+    //    pointDF.show(5)
+    //    pointDF.printSchema()
     pointDF.repartition(numPartitions)
   }
 
@@ -82,6 +98,7 @@ object AnomalyExp {
     val week = Integer.parseInt(formatter.format(d))
     week
   }
+
   def getHour(t: Long): Int =
     timeLong2String(t).split(" ")(1).split(":")(0).toInt
 
