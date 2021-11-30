@@ -1,18 +1,22 @@
 import TrajRangeQuery.readTraj
-import com.vividsolutions.jts.geom.Geometry
+import com.vividsolutions.jts.geom.{Envelope, Geometry}
 import org.apache.spark.serializer.KryoSerializer
 import org.apache.spark.sql.SparkSession
+import org.datasyslab.geospark.enums.IndexType
 import org.datasyslab.geospark.serde.GeoSparkKryoRegistrator
+import org.datasyslab.geospark.spatialOperator.RangeQuery
 import org.datasyslab.geosparksql.utils.{Adapter, GeoSparkSQLRegistrator}
 import utils.Config
+import scala.collection.JavaConverters._
 
 import java.lang.System.nanoTime
+import scala.io.Source
 import scala.math.{abs, acos, cos, sin}
 
 object AvgSpeedExtraction {
   def main(args: Array[String]): Unit = {
     val dataFile = args(0)
-    val numPartitions = args(1).toInt
+    val queryFile = args(1)
 
     val spark = SparkSession.builder()
       .master(Config.get("master"))
@@ -25,23 +29,36 @@ object AvgSpeedExtraction {
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
 
-    val trajDf = readTraj(dataFile, numPartitions)
-    val trajRDD = Adapter.toSpatialRdd(trajDf, "linestring")
-    trajRDD.rawSpatialRDD.rdd.cache()
-    println(trajRDD.rawSpatialRDD.count())
+    val f = Source.fromFile(queryFile)
+    val queries = f.getLines().toArray.map(_.split(" "))
     val t = nanoTime
-    val combinedRDD = trajRDD.rawSpatialRDD.map[(Geometry, String)](f => (f, f.getUserData.asInstanceOf[String]))
-      .map {
-        case (geoms, tsString) =>
-          val timestamps = tsString.split("\t").last.split(",").map(_.toLong)
-          val coords = geoms.getCoordinates.map(x => (x.x, x.y))
-          val length = coords.sliding(2).map(x => greatCircleDistance(x(0), x(1))).sum
-          length / (timestamps.last - timestamps.head) * 3.6
+    for (q <- queries) {
+      val trajDf = readTraj(dataFile, 2)
+      val trajRDD = Adapter.toSpatialRdd(trajDf, "linestring")
+      trajRDD.analyze()
+      trajRDD.buildIndex(IndexType.RTREE, false)
+      val query = q.map(_.toDouble)
+      val sQuery = new Envelope(query(0), query(2), query(1), query(3))
+      val start = q(4).toLong
+      val end = q(5).toLong
+      val resultS = RangeQuery.SpatialRangeQuery(trajRDD, sQuery, true, true)
+      val combinedRDD = resultS.map[(Geometry, String)](f => (f, f.getUserData.asInstanceOf[String]))
+        .map {
+          case (geoms, tsString) =>
+            val timestamps = tsString.split("\t").last.split(",").map(_.toLong)
+            val id = tsString.split("\t").head
+            (geoms, timestamps, id)
+        }
+        .filter { case (_, timestamps, _) =>
+          timestamps.head < end && timestamps.last >= start
+        }.map { case (geoms, timestamps, id) =>
+        val coords = geoms.getCoordinates.map(x => (x.x, x.y))
+        val length = coords.sliding(2).map(x => greatCircleDistance(x(0), x(1))).sum
+        (id, length / (timestamps.last - timestamps.head) * 3.6)
       }
-    combinedRDD.collect()
-    println(combinedRDD.take(5))
-    println(s"Avg speed ${(nanoTime - t) * 1e-9} s" )
-
+      println(combinedRDD.collect.asScala.toArray.take(5).deep)
+    }
+    println(s"Avg speed ${(nanoTime - t) * 1e-9} s")
     sc.stop()
   }
 
