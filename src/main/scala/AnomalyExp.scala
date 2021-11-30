@@ -63,7 +63,7 @@ object AnomalyExp {
         .map(_._2)
       println(combinedRDD.collect.asScala.toArray.take(5).deep)
       combinedRDD.unpersist()
-      pointRDD.
+      pointRDD.rawSpatialRDD.unpersist()
       spark.catalog.clearCache()
     }
     println(s"Anomaly ${(nanoTime - t) * 1e-9} s")
