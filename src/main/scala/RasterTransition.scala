@@ -58,16 +58,18 @@ object RasterTransition {
         timestamps.head < end && timestamps.last >= start
       }.map(x => x._1.getCoordinates.map(x => geometryFactory.createPoint(x)) zip x._2).rdd.repartition(numPartitions)
       val resRDD = combinedRDD
-        .flatMap { x =>
-          stRanges.zipWithIndex.map { case (stRange, idx) =>
+        .map { x =>
+          stRanges.map { stRange =>
             val inside = x.map(p => p._1.intersects(stRange._1) &&
               stRange._2._1 <= p._2 && stRange._2._2 >= p._2).sliding(2).toArray
             val in = inside.count(_ sameElements Array(false, true))
             val out = inside.count(_ sameElements Array(true, false))
-            (idx, (in, out))
+            (in, out)
           }
-        }.reduceByKey((x, y) => (x._1 + y._1, x._2 + y._2))
-      println(resRDD.collect.take(5).deep)
+        }
+      val res = resRDD.collect
+      val r = res.drop(1).foldLeft(res.head)( (a, b) => a.zip(b).map { case (x, y) => (x._1 + y._1, x._2 + y._2)})
+      println(r.deep)
       combinedRDD.unpersist()
       resRDD.unpersist()
       trajRDD.indexedRawRDD.unpersist()
