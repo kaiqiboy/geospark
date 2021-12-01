@@ -18,6 +18,7 @@ object RasterTransition {
     val queryFile = args(1)
     val sSplit = args(2).toDouble
     val tSplit = args(3).toInt
+    val numPartitions = args(4).toInt
     val spark = SparkSession.builder()
       .master(Config.get("master"))
       .appName("GeoSparkAvgSpeed")
@@ -53,20 +54,24 @@ object RasterTransition {
             val timestamps = tsString.split("\t").last.split(",").map(_.toLong)
             val id = tsString.split("\t").head
             (geoms, timestamps, id)
-        }.rdd
-        .filter { case (_, timestamps, _) =>
-          timestamps.head < end && timestamps.last >= start
-        }.flatMap { case (geoms, timestamps, _) =>
-        stRanges.zipWithIndex.map { case (stRange, idx) =>
-          val inside = (geoms.getCoordinates zip timestamps).map(p => geometryFactory.createPoint(p._1).intersects(stRange._1) &&
-            stRange._2._1 <= p._2 && stRange._2._2 >= p._2).sliding(2).toArray
-          val in = inside.count(_ sameElements Array(false, true))
-          val out = inside.count(_ sameElements Array(true, false))
-          (idx, (in, out))
-        }
-      }.reduceByKey((x, y) => (x._1 + y._1, x._2 + y._2))
-      println(combinedRDD.collect.take(5).deep)
+        }.filter { case (_, timestamps, _) =>
+        timestamps.head < end && timestamps.last >= start
+      }.map(x => x._1.getCoordinates.map(x => geometryFactory.createPoint(x)) zip x._2).rdd.repartition(numPartitions)
+      val resRDD = combinedRDD
+        .flatMap { x =>
+          stRanges.zipWithIndex.map { case (stRange, idx) =>
+            val inside = x.map(p => p._1.intersects(stRange._1) &&
+              stRange._2._1 <= p._2 && stRange._2._2 >= p._2).sliding(2).toArray
+            val in = inside.count(_ sameElements Array(false, true))
+            val out = inside.count(_ sameElements Array(true, false))
+            (idx, (in, out))
+          }
+        }.reduceByKey((x, y) => (x._1 + y._1, x._2 + y._2))
+      println(resRDD.collect.take(5).deep)
       combinedRDD.unpersist()
+      resRDD.unpersist()
+      trajRDD.indexedRawRDD.unpersist()
+      trajRDD.rawSpatialRDD.unpersist()
       spark.catalog.clearCache()
     }
     println(s"Avg speed ${(nanoTime - t) * 1e-9} s")
