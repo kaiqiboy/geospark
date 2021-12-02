@@ -62,7 +62,7 @@ object SmSpeed {
         val speed = (length / (timestamps.last - timestamps.head) * 3.6)
         intersectCells.map(x => (x, (speed, 1)))
       }.reduceByKey((x, y) => (x._1 + y._1, x._2 + y._2)).mapValues(x => x._1 / x._2)
-      println(combinedRDD.collect.deep)
+      println(combinedRDD.collect.take(5).deep)
       spark.catalog.clearCache()
     }
     println(s"Avg speed ${(nanoTime - t) * 1e-9} s")
