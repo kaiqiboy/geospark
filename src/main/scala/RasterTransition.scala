@@ -56,15 +56,22 @@ object RasterTransition {
             (geoms, timestamps, id)
         }.filter { case (_, timestamps, _) =>
         timestamps.head < end && timestamps.last >= start
-      }.rdd.map(x => x._1.getCoordinates.map(x => geometryFactory.createPoint(x)) zip x._2)
+      }.rdd //.map(x => x._1.getCoordinates.map(x => geometryFactory.createPoint(x)) zip x._2)
       val resRDD = combinedRDD
         .map { x =>
           stRanges.map { stRange =>
-            val inside = x.map(p => p._1.intersects(stRange._1) &&
-              stRange._2._1 <= p._2 && stRange._2._2 >= p._2).sliding(2).toArray
-            val in = inside.count(_ sameElements Array(false, true))
-            val out = inside.count(_ sameElements Array(true, false))
-            (in, out)
+            var in = 0
+            var out = 0
+            if (x._1.intersects(stRange._1)) {
+              val points = x._1.getCoordinates.map(x => geometryFactory.createPoint(x)) zip x._2
+              val inside = points.map(p => p._1.intersects(stRange._1) &&
+                stRange._2._1 <= p._2 && stRange._2._2 >= p._2).sliding(2)
+              inside.foreach(x => {
+                if (x == Array(false, true)) in += 1
+                if (x == Array(true, false)) out += 1
+              })
+              (in, out)
+            } else (0, 0)
           }
         }
       val r = resRDD.mapPartitions { p =>
@@ -75,12 +82,14 @@ object RasterTransition {
         Iterator(res)
       }.collect()
       val res = r.drop(1).foldLeft(r.head)((a, b) => a.zip(b).map { case (x, y) => (x._1 + y._1, x._2 + y._2) })
-
       println(res.deep)
+
       combinedRDD.unpersist()
-      resRDD.unpersist()
+      //      resRDD.unpersist()
       trajRDD.indexedRawRDD.unpersist()
       trajRDD.rawSpatialRDD.unpersist()
+      trajDf.unpersist()
+      resultS.unpersist()
       spark.catalog.clearCache()
     }
     println(s"Avg speed ${(nanoTime - t) * 1e-9} s")
