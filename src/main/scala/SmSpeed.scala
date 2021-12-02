@@ -61,7 +61,7 @@ object SmSpeed {
           ranges.map(r => if (r.intersects(geoms)) (speed, 1) else (0.0, 0))
       }
       val r = combinedRDD.mapPartitions{p =>
-        var res = p.next()
+        var res = ranges.map(_=> (0.0,0))
         while(p.hasNext){
           res =  res.zip(p.next).map { case (x, y) => (x._1 + y._1, x._2 + y._2)}
         }
