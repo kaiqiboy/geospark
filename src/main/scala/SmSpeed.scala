@@ -70,6 +70,7 @@ object SmSpeed {
       val res = r.drop(1).foldLeft(r.head)( (a, b) => a.zip(b).map { case (x, y) => (x._1 + y._1, x._2 + y._2)})
         .map(x => x._1 / x._2)
       println(res.deep)
+      sc.getPersistentRDDs.foreach(x => x._2.unpersist())
       combinedRDD.unpersist()
       trajRDD.indexedRawRDD.unpersist()
       trajRDD.rawSpatialRDD.unpersist()

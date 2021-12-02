@@ -56,11 +56,21 @@ object TsFlow {
             (geoms, timestamp, id)
         }.filter { case (_, timestamp, _) =>
         timestamp < end && timestamp >= start
-      }.rdd.flatMap {
-        case (_, timestamp, _) => ts.zipWithIndex.filter(t => t._1._1 <= timestamp && t._1._2 >= timestamp).map(x => (x._2, 1))
-      }.reduceByKey(_+_)
+      }.rdd.map {
+        case (geoms, timestamp, _) =>
 
-      println(combinedRDD.collect.take(5).deep)
+          ts.map(r => if (timestamp <= r._2 && timestamp >= r._1) 1 else 0)
+      }
+      val r = combinedRDD.mapPartitions { p =>
+        var res = ts.map(_ => 0)
+        while (p.hasNext) {
+          res = res.zip(p.next).map(x => x._1 + x._2)
+        }
+        Iterator(res)
+      }.collect()
+      val res = r.drop(1).foldLeft(r.head)((a, b) => a.zip(b).map { case (x, y) => x + y })
+      println(res.deep)
+
       combinedRDD.unpersist()
       pointRDD.rawSpatialRDD.unpersist()
       spark.catalog.clearCache()

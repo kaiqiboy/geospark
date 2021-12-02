@@ -1,3 +1,4 @@
+import SmSpeed.greatCircleDistance
 import TrajRangeQuery.readTraj
 import com.vividsolutions.jts.geom._
 import org.apache.spark.serializer.KryoSerializer
@@ -48,48 +49,69 @@ object RasterTransition {
       val start = q(4).toLong
       val end = q(5).toLong
       val resultS = RangeQuery.SpatialRangeQuery(trajRDD, sQuery, true, true)
+      //      val combinedRDD = resultS.map[(Geometry, String)](f => (f, f.getUserData.asInstanceOf[String]))
+      //        .map {
+      //          case (geoms, tsString) =>
+      //            val timestamps = tsString.split("\t").last.split(",").map(_.toLong)
+      //            val id = tsString.split("\t").head
+      //            (geoms, timestamps, id)
+      //        }.filter { case (_, timestamps, _) =>
+      //        timestamps.head < end && timestamps.last >= start
+      //      }.rdd //.map(x => x._1.getCoordinates.map(x => geometryFactory.createPoint(x)) zip x._2)
+      //      val resRDD = combinedRDD
+      //        .map { x =>
+      //          stRanges.map { stRange =>
+      //            var in = 0
+      //            var out = 0
+      //            if (x._1.intersects(stRange._1)) {
+      //              val points = x._1.getCoordinates.map(x => geometryFactory.createPoint(x)) zip x._2
+      //              val inside = points.map(p => p._1.intersects(stRange._1) &&
+      //                stRange._2._1 <= p._2 && stRange._2._2 >= p._2).sliding(2)
+      //              inside.foreach(x => {
+      //                if (x == Array(false, true)) in += 1
+      //                if (x == Array(true, false)) out += 1
+      //              })
+      //              (in, out)
+      //            } else (0, 0)
+      //          }
+      //        }
+      //      val r = resRDD.mapPartitions { p =>
+      //        var res = stRanges.map(_ => (0, 0))
+      //        while (p.hasNext) {
+      //          res = res.zip(p.next).map { case (x, y) => (x._1 + y._1, x._2 + y._2) }
+      //        }
+      //        Iterator(res)
+      //      }.collect()
+      //      val res = r.drop(1).foldLeft(r.head)((a, b) => a.zip(b).map { case (x, y) => (x._1 + y._1, x._2 + y._2) })
+      //      println(res.deep)
       val combinedRDD = resultS.map[(Geometry, String)](f => (f, f.getUserData.asInstanceOf[String]))
         .map {
           case (geoms, tsString) =>
             val timestamps = tsString.split("\t").last.split(",").map(_.toLong)
             val id = tsString.split("\t").head
-            (geoms, timestamps, id)
-        }.filter { case (_, timestamps, _) =>
-        timestamps.head < end && timestamps.last >= start
-      }.rdd //.map(x => x._1.getCoordinates.map(x => geometryFactory.createPoint(x)) zip x._2)
-      val resRDD = combinedRDD
-        .map { x =>
-          stRanges.map { stRange =>
-            var in = 0
-            var out = 0
-            if (x._1.intersects(stRange._1)) {
-              val points = x._1.getCoordinates.map(x => geometryFactory.createPoint(x)) zip x._2
-              val inside = points.map(p => p._1.intersects(stRange._1) &&
-                stRange._2._1 <= p._2 && stRange._2._2 >= p._2).sliding(2)
-              inside.foreach(x => {
-                if (x == Array(false, true)) in += 1
-                if (x == Array(true, false)) out += 1
-              })
-              (in, out)
-            } else (0, 0)
-          }
+            (geoms, timestamps)
         }
-      val r = resRDD.mapPartitions { p =>
-        var res = stRanges.map(_ => (0, 0))
+        .filter { case (_, timestamps) =>
+          timestamps.head < end && timestamps.last >= start
+        }.rdd.map {
+        case (geoms, timestamps) =>
+          val coords = geoms.getCoordinates.map(x => (x.x, x.y))
+          val length = coords.sliding(2).map(x => greatCircleDistance(x(0), x(1))).sum
+          val speed = (length / (timestamps.last - timestamps.head) * 3.6).toDouble
+          stRanges.map(r => if (r._1.intersects(geoms) && r._2._1 <= timestamps.last && r._2._2 >= timestamps.head) (speed, 1) else (0.0, 0))
+      }
+      val r = combinedRDD.mapPartitions { p =>
+        var res = stRanges.map(_ => (0.0, 0))
         while (p.hasNext) {
           res = res.zip(p.next).map { case (x, y) => (x._1 + y._1, x._2 + y._2) }
         }
         Iterator(res)
       }.collect()
       val res = r.drop(1).foldLeft(r.head)((a, b) => a.zip(b).map { case (x, y) => (x._1 + y._1, x._2 + y._2) })
+        .map(x => x._1 / x._2)
       println(res.deep)
 
-      combinedRDD.unpersist()
-      //      resRDD.unpersist()
-      trajRDD.indexedRawRDD.unpersist()
-      trajRDD.rawSpatialRDD.unpersist()
-      trajDf.unpersist()
-      resultS.unpersist()
+      sc.getPersistentRDDs.foreach(x => x._2.unpersist())
       spark.catalog.clearCache()
     }
     println(s"Avg speed ${(nanoTime - t) * 1e-9} s")
