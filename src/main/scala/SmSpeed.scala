@@ -1,4 +1,3 @@
-import AvgSpeedExtraction.greatCircleDistance
 import TrajRangeQuery.readTraj
 import com.vividsolutions.jts.geom.{Coordinate, Envelope, Geometry, GeometryFactory, Polygon}
 import org.apache.spark.serializer.KryoSerializer
@@ -50,20 +49,21 @@ object SmSpeed {
           case (geoms, tsString) =>
             val timestamps = tsString.split("\t").last.split(",").map(_.toLong)
             val id = tsString.split("\t").head
-            (geoms, timestamps, id)
+            (geoms, timestamps)
         }
-        .filter { case (_, timestamps, _) =>
+        .filter { case (_, timestamps) =>
           timestamps.head < end && timestamps.last >= start
-        }.rdd.flatMap { case (geoms, timestamps, _) =>
-        val intersectCells = ranges.zipWithIndex.filter {
-          case (rectangle, _) => rectangle.intersects(geoms)
-        }.map(_._2)
-        val coords = geoms.getCoordinates.map(x => (x.x, x.y))
-        val length = coords.sliding(2).map(x => greatCircleDistance(x(0), x(1))).sum
-        val speed = (length / (timestamps.last - timestamps.head) * 3.6)
-        intersectCells.map(x => (x, (speed, 1)))
-      }.reduceByKey((x, y) => (x._1 + y._1, x._2 + y._2)).mapValues(x => x._1 / x._2)
-      println(combinedRDD.collect.take(5).deep)
+        }.rdd.map {
+        case (geoms, timestamps) =>
+          val coords = geoms.getCoordinates.map(x => (x.x, x.y))
+          val length = coords.sliding(2).map(x => greatCircleDistance(x(0), x(1))).sum
+          val speed = (length / (timestamps.last - timestamps.head) * 3.6).toDouble
+          ranges.map(r => if (r.intersects(geoms)) (speed, 1) else (0.0, 0))
+      }
+      val r = combinedRDD.collect
+      val res = r.drop(1).foldLeft(r.head)( (a, b) => a.zip(b).map { case (x, y) => (x._1 + y._1, x._2 + y._2)})
+        .map(x => x._1 / x._2)
+      println(res.deep)
       spark.catalog.clearCache()
     }
     println(s"Avg speed ${(nanoTime - t) * 1e-9} s")
