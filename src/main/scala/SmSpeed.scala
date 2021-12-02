@@ -18,7 +18,8 @@ object SmSpeed {
   def main(args: Array[String]): Unit = {
     val dataFile = args(0)
     val queryFile = args(1)
-    val sSplit = args(2).toDouble
+    val numPartitions = args(2).toInt
+    val sSplit = args(3).toDouble
     val spark = SparkSession.builder()
       .master(Config.get("master"))
       .appName("GeoSparkAvgSpeed")
@@ -35,7 +36,7 @@ object SmSpeed {
     val t = nanoTime
     for (q <- queries) {
       val ranges = splitSpatial(Array(q(0), q(1), q(2), q(3)).map(_.toDouble), sSplit)
-      val trajDf = readTraj(dataFile, 2)
+      val trajDf = readTraj(dataFile, numPartitions)
       val trajRDD = Adapter.toSpatialRdd(trajDf, "linestring")
       trajRDD.analyze()
       trajRDD.buildIndex(IndexType.RTREE, false)

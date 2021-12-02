@@ -17,7 +17,7 @@ object AvgSpeedExtraction {
   def main(args: Array[String]): Unit = {
     val dataFile = args(0)
     val queryFile = args(1)
-
+    val numPartitions = args(2).toInt
     val spark = SparkSession.builder()
       .master(Config.get("master"))
       .appName("GeoSparkAvgSpeed")
@@ -33,7 +33,7 @@ object AvgSpeedExtraction {
     val queries = f.getLines().toArray.map(_.split(" "))
     val t = nanoTime
     for (q <- queries) {
-      val trajDf = readTraj(dataFile, 2)
+      val trajDf = readTraj(dataFile, numPartitions)
       val trajRDD = Adapter.toSpatialRdd(trajDf, "linestring")
       trajRDD.analyze()
       trajRDD.buildIndex(IndexType.RTREE, false)

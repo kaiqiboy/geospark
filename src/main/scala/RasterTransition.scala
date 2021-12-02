@@ -39,7 +39,7 @@ object RasterTransition {
       val sRanges = splitSpatial(Array(q(0), q(1), q(2), q(3)).map(_.toDouble), sSplit)
       val tRanges = splitTemporal(Array(q(4), q(5)).map(_.toLong), tSplit)
       val stRanges = for (s <- sRanges; t <- tRanges) yield (s, t)
-      val trajDf = readTraj(dataFile, 2)
+      val trajDf = readTraj(dataFile, numPartitions)
       val trajRDD = Adapter.toSpatialRdd(trajDf, "linestring")
       trajRDD.analyze()
       trajRDD.buildIndex(IndexType.RTREE, false)
