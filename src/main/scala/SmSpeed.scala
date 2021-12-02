@@ -60,7 +60,13 @@ object SmSpeed {
           val speed = (length / (timestamps.last - timestamps.head) * 3.6).toDouble
           ranges.map(r => if (r.intersects(geoms)) (speed, 1) else (0.0, 0))
       }
-      val r = combinedRDD.collect
+      val r = combinedRDD.mapPartitions{p =>
+        var res = p.next()
+        while(p.hasNext){
+          res =  res.zip(p.next).map { case (x, y) => (x._1 + y._1, x._2 + y._2)}
+        }
+        Iterator(res)
+      }.collect()
       val res = r.drop(1).foldLeft(r.head)( (a, b) => a.zip(b).map { case (x, y) => (x._1 + y._1, x._2 + y._2)})
         .map(x => x._1 / x._2)
       println(res.deep)
