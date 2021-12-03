@@ -33,8 +33,8 @@ object IntervalSpeedExtraction {
 
     val ranges = (0 to NumDays).map(x =>
       (sQuery, (x * 86400 + tStart, (x + 1) * 86400 + tStart))).toArray
-    val t = nanoTime
     for ((s, tQuery) <- ranges) {
+      val t = nanoTime
       val trajDf = readTraj(fileName, numPartitions)
       val trajRDD = Adapter.toSpatialRdd(trajDf, "linestring")
       trajRDD.analyze()
