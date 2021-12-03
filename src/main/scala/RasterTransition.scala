@@ -58,20 +58,24 @@ object RasterTransition {
             (geoms, timestamps)
         }.filter { case (_, timestamps) =>
         timestamps.head < end && timestamps.last >= start
-      }.rdd.map(x => x._1.getCoordinates.map(x => geometryFactory.createPoint(x)) zip x._2)
+      }.rdd
       val resRDD = combinedRDD
-        .map { x =>
+        .map { case(linestring, timestamps) =>
           var in = 0
           var out = 0
           stRanges.map { stRange =>
-            val inside = x.map(p => p._1.intersects(stRange._1) &&
-              stRange._2._1 <= p._2 && stRange._2._2 >= p._2).sliding(2)
-            while (inside.hasNext) {
-              val a = inside.next
-              if (a == (true, false)) out += 1
-              else if (a == (false, true)) in += 1
+            if(!(linestring.intersects(stRange._1) && tIntersects((timestamps.head, timestamps.last), stRange._2))) (0,0)
+            else {
+              val points = linestring.getCoordinates.map(x => geometryFactory.createPoint(x)) zip timestamps
+              val inside = points.map(p => p._1.intersects(stRange._1) &&
+                stRange._2._1 <= p._2 && stRange._2._2 >= p._2).sliding(2)
+              while (inside.hasNext) {
+                val a = inside.next
+                if (a == (true, false)) out += 1
+                else if (a == (false, true)) in += 1
+              }
+              (in, out)
             }
-            (in, out)
           }
         }
       val empty = stRanges.map(_ => (0, 0))
@@ -130,5 +134,8 @@ object RasterTransition {
     val tSplit = ((tMax - tMin) / tStep).toInt
     val ts = (0 to tSplit).map(x => x * tStep + tMin).sliding(2).toArray
     for (t <- ts) yield (t(0), t(1))
+  }
+  def tIntersects(t1: (Long, Long), t2: (Long, Long)): Boolean = {
+    !(t1._2 < t2._1 || t2._2 < t1._1)
   }
 }
