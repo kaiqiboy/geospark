@@ -68,7 +68,7 @@ object RasterFlowExtraction {
       }
       val empty = raster.map(_ => 0)
       val res = resRDD.aggregate(empty)((x, y) => (x zip y).map(x => x._1 + x._2), (x, y) => (x zip y).map(x => x._1 + x._2))
-      println(res.deep)
+      println(res.take(10).deep)
       spark.catalog.clearCache()
       println(s"${tQuery._1} Interval extraction ${(nanoTime - t) * 1e-9} s")
     }
