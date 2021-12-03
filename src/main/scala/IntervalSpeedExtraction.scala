@@ -10,7 +10,6 @@ import utils.Config
 
 import java.lang.System.nanoTime
 import scala.collection.JavaConverters._
-import scala.io.Source
 import scala.math.{abs, acos, cos, sin}
 
 object IntervalSpeedExtraction {
@@ -26,11 +25,9 @@ object IntervalSpeedExtraction {
       .config("spark.serializer", classOf[KryoSerializer].getName)
       .config("spark.kryo.registrator", classOf[GeoSparkKryoRegistrator].getName)
       .getOrCreate()
-
     GeoSparkSQLRegistrator.registerAll(spark)
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
-
     val ranges = (0 to NumDays).map(x =>
       (sQuery, (x * 86400 + tStart, (x + 1) * 86400 + tStart))).toArray
     for ((s, tQuery) <- ranges) {
@@ -66,7 +63,6 @@ object IntervalSpeedExtraction {
     }
     sc.stop()
   }
-
   def greatCircleDistance(p1: (Double, Double), p2: (Double, Double)): Double = {
     val x1 = p1._1
     val x2 = p2._1
