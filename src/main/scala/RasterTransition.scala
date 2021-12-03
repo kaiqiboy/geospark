@@ -48,6 +48,8 @@ object RasterTransition {
       val start = q(4).toLong
       val end = q(5).toLong
       val resultS = RangeQuery.SpatialRangeQuery(trajRDD, sQuery, true, true)
+      trajRDD.indexedRawRDD.unpersist()
+      trajRDD.rawSpatialRDD.unpersist()
       val combinedRDD = resultS.map[(Geometry, String)](f => (f, f.getUserData.asInstanceOf[String]))
         .map {
           case (geoms, tsString) =>

@@ -60,10 +60,10 @@ object IntervalSpeedExtraction {
         val speeds = (lengths zip durations).map(x => x._1 / x._2 * 3.6)
         (id, points zip speeds)
       }
-      combinedRDD.collect.asScala.toArray.take(5).foreach(x => println(x._1, x._2.deep))
+      combinedRDD.collect.asScala.toArray.take(5).foreach(println)
       spark.catalog.clearCache()
+      println(s"${tQuery._1} Interval extraction ${(nanoTime - t) * 1e-9} s")
     }
-    println(s"Internal speed ${(nanoTime - t) * 1e-9} s")
     sc.stop()
   }
 
