@@ -7,7 +7,6 @@ import org.datasyslab.geospark.serde.GeoSparkKryoRegistrator
 import org.datasyslab.geospark.spatialOperator.RangeQuery
 import org.datasyslab.geosparksql.utils.{Adapter, GeoSparkSQLRegistrator}
 import utils.Config
-
 import java.lang.System.nanoTime
 import scala.collection.JavaConverters._
 import scala.io.Source
@@ -25,11 +24,9 @@ object SmSpeed {
       .config("spark.serializer", classOf[KryoSerializer].getName)
       .config("spark.kryo.registrator", classOf[GeoSparkKryoRegistrator].getName)
       .getOrCreate()
-
     GeoSparkSQLRegistrator.registerAll(spark)
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
-
     val f = Source.fromFile(queryFile)
     val queries = f.getLines().toArray.map(_.split(" "))
     val t = nanoTime
@@ -69,17 +66,16 @@ object SmSpeed {
       }.collect()
       val res = r.drop(1).foldLeft(r.head)( (a, b) => a.zip(b).map { case (x, y) => (x._1 + y._1, x._2 + y._2)})
         .map(x => x._1 / x._2)
-      println(res.deep)
+      println(res.take(5))
       sc.getPersistentRDDs.foreach(x => x._2.unpersist())
       combinedRDD.unpersist()
       trajRDD.indexedRawRDD.unpersist()
       trajRDD.rawSpatialRDD.unpersist()
       spark.catalog.clearCache()
     }
-    println(s"Avg speed ${(nanoTime - t) * 1e-9} s")
+    println(s"sm speed ${(nanoTime - t) * 1e-9} s")
     sc.stop()
   }
-
   def greatCircleDistance(p1: (Double, Double), p2: (Double, Double)): Double = {
     val x1 = p1._1
     val x2 = p2._1
@@ -93,7 +89,6 @@ object SmSpeed {
     val deltaSigma = acos(sin(phi1) * sin(phi2) + cos(phi1) * cos(phi2) * cos(abs(lambda2 - lambda1)))
     r * deltaSigma
   }
-
   def splitSpatial(spatialRange: Array[Double], gridSize: Double): Array[Polygon] = {
     val geometryFactory = new GeometryFactory()
     val xMin = spatialRange(0)

@@ -69,13 +69,13 @@ object TsFlow {
         Iterator(res)
       }.collect()
       val res = r.drop(1).foldLeft(r.head)((a, b) => a.zip(b).map { case (x, y) => x + y })
-      println(res.deep)
+      println(res.take(5))
 
       combinedRDD.unpersist()
       pointRDD.rawSpatialRDD.unpersist()
       spark.catalog.clearCache()
     }
-    println(s"Anomaly ${(nanoTime - t) * 1e-9} s")
+    println(s"ts flow ${(nanoTime - t) * 1e-9} s")
     sc.stop()
   }
 

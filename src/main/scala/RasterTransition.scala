@@ -82,14 +82,14 @@ object RasterTransition {
       val res = resRDD.aggregate(empty)((x, y) => (x zip y).map(x => (x._1._1 + x._2._1, x._1._2 + x._2._2)),
         (x, y) => (x zip y).map(x => (x._1._1 + x._2._1, x._1._2 + x._2._2)))
 
-      println(res.deep)
+      println(res.take(5))
       combinedRDD.unpersist()
       resRDD.unpersist()
       trajRDD.indexedRawRDD.unpersist()
       trajRDD.rawSpatialRDD.unpersist()
       spark.catalog.clearCache()
     }
-    println(s"Avg speed ${(nanoTime - t) * 1e-9} s")
+    println(s"raster transition ${(nanoTime - t) * 1e-9} s")
     sc.stop()
   }
 

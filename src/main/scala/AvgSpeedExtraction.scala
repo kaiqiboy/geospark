@@ -59,7 +59,7 @@ object AvgSpeedExtraction {
       println(combinedRDD.collect.asScala.toArray.take(5).deep)
       spark.catalog.clearCache()
     }
-    println(s"Avg speed ${(nanoTime - t) * 1e-9} s")
+    println(s"avg speed ${(nanoTime - t) * 1e-9} s")
     sc.stop()
   }
 

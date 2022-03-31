@@ -1,7 +1,6 @@
-import TrajRangeQuery.readTraj
 import com.vividsolutions.jts.geom.{Envelope, Geometry}
 import org.apache.spark.serializer.KryoSerializer
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.datasyslab.geospark.enums.IndexType
 import org.datasyslab.geospark.serde.GeoSparkKryoRegistrator
 import org.datasyslab.geospark.spatialOperator.RangeQuery
@@ -13,6 +12,10 @@ import scala.collection.JavaConverters._
 import scala.math.{abs, acos, cos, sin}
 
 object IntervalSpeedExtraction {
+  case class TrajPoint(lon: Double, lat: Double, t: Array[Long], v: Option[String])
+
+  case class T(points: Array[TrajPoint], d: String)
+
   def main(args: Array[String]): Unit = {
     val fileName = args(0)
     val numPartitions = args(1).toInt
@@ -63,6 +66,7 @@ object IntervalSpeedExtraction {
     }
     sc.stop()
   }
+
   def greatCircleDistance(p1: (Double, Double), p2: (Double, Double)): Double = {
     val x1 = p1._1
     val x2 = p2._1
@@ -75,5 +79,24 @@ object IntervalSpeedExtraction {
     val lambda2 = x2.toRadians
     val deltaSigma = acos(sin(phi1) * sin(phi2) + cos(phi1) * cos(phi2) * cos(abs(lambda2 - lambda1)))
     r * deltaSigma
+  }
+
+  def readTraj(file: String, numPartitions: Int): DataFrame = {
+    val spark = SparkSession.builder().getOrCreate()
+    val readDs = spark.read.parquet(file)
+    import spark.implicits._
+    val trajRDD = readDs.as[T].rdd.map(t => {
+      val string = t.points.flatMap(e => Array(e.lon, e.lat)).mkString(",")
+      val tsArray = t.points.flatMap(e => Array(e.t(0))).mkString(",")
+      (string, t.d, tsArray)
+    })
+    val df = trajRDD.toDF("string", "id", "tsArray")
+    df.createOrReplaceTempView("input")
+    val sqlQuery = "SELECT ST_LineStringFromText(CAST(input.string AS STRING), ',') AS linestring, " +
+      "CAST(input.id AS STRING) AS id," +
+      "CAST(input.tsArray AS STRING)  AS tsArray " +
+      "FROM input"
+    val lineStringDF = spark.sql(sqlQuery)
+    lineStringDF.repartition(numPartitions)
   }
 }

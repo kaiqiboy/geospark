@@ -76,8 +76,6 @@ object TrajRangeQuery {
   def readTraj(file: String, numPartitions: Int): DataFrame = {
     val spark = SparkSession.builder().getOrCreate()
     val readDs = spark.read.parquet(file)
-    //    readDs.show(5)
-    //    readDs.printSchema()
     import spark.implicits._
     val trajRDD = readDs.as[T].rdd.map(t => {
       val string = t.points.flatMap(e => Array(e.lon, e.lat)).mkString(",")
@@ -86,18 +84,11 @@ object TrajRangeQuery {
     })
     val df = trajRDD.toDF("string", "id", "tsArray")
     df.createOrReplaceTempView("input")
-    //    df.show(5)
-    //    df.printSchema()
     val sqlQuery = "SELECT ST_LineStringFromText(CAST(input.string AS STRING), ',') AS linestring, " +
       "CAST(input.id AS STRING) AS id," +
       "CAST(input.tsArray AS STRING)  AS tsArray " +
       "FROM input"
-
     val lineStringDF = spark.sql(sqlQuery)
-
-    //    lineStringDF.show(5)
-    //    lineStringDF.printSchema()
     lineStringDF.repartition(numPartitions)
-
   }
 }

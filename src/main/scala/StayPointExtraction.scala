@@ -60,7 +60,7 @@ object StayPointExtraction {
       println(combinedRDD.collect.asScala.toArray.take(5).deep)
       spark.catalog.clearCache()
     }
-    println(s"Stay point ${(nanoTime - t) * 1e-9} s")
+    println(s"stay point ${(nanoTime - t) * 1e-9} s")
     sc.stop()
   }
 
