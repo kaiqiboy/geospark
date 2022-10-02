@@ -1,14 +1,14 @@
-import TrajRangeQuery.readTraj
+import TrajRangeQuery.T
 import com.vividsolutions.jts.geom.{Envelope, Geometry}
 import org.apache.spark.serializer.KryoSerializer
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.datasyslab.geospark.enums.IndexType
 import org.datasyslab.geospark.serde.GeoSparkKryoRegistrator
 import org.datasyslab.geospark.spatialOperator.RangeQuery
 import org.datasyslab.geosparksql.utils.{Adapter, GeoSparkSQLRegistrator}
 import utils.Config
-import scala.collection.JavaConverters._
 
+import scala.collection.JavaConverters._
 import java.lang.System.nanoTime
 import scala.io.Source
 import scala.math.{abs, acos, cos, sin}
@@ -24,11 +24,9 @@ object AvgSpeedExtraction {
       .config("spark.serializer", classOf[KryoSerializer].getName)
       .config("spark.kryo.registrator", classOf[GeoSparkKryoRegistrator].getName)
       .getOrCreate()
-
     GeoSparkSQLRegistrator.registerAll(spark)
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
-
     val f = Source.fromFile(queryFile)
     val queries = f.getLines().toArray.map(_.split(" "))
     val t = nanoTime
@@ -75,5 +73,24 @@ object AvgSpeedExtraction {
     val lambda2 = x2.toRadians
     val deltaSigma = acos(sin(phi1) * sin(phi2) + cos(phi1) * cos(phi2) * cos(abs(lambda2 - lambda1)))
     r * deltaSigma
+  }
+
+  def readTraj(file: String, numPartitions: Int): DataFrame = {
+    val spark = SparkSession.builder().getOrCreate()
+    val readDs = spark.read.parquet(file)
+    import spark.implicits._
+    val trajRDD = readDs.as[T].rdd.map(t => {
+      val string = t.points.flatMap(e => Array(e.lon, e.lat)).mkString(",")
+      val tsArray = t.points.flatMap(e => Array(e.t(0))).mkString(",")
+      (string, t.d, tsArray)
+    })
+    val df = trajRDD.toDF("string", "id", "tsArray")
+    df.createOrReplaceTempView("input")
+    val sqlQuery = "SELECT ST_LineStringFromText(CAST(input.string AS STRING), ',') AS linestring, " +
+      "CAST(input.id AS STRING) AS id," +
+      "CAST(input.tsArray AS STRING)  AS tsArray " +
+      "FROM input"
+    val lineStringDF = spark.sql(sqlQuery)
+    lineStringDF.repartition(numPartitions)
   }
 }

@@ -1,7 +1,7 @@
-import TrajRangeQuery.readTraj
+import TrajRangeQuery.T
 import com.vividsolutions.jts.geom.{Envelope, Geometry, LineString, Point}
 import org.apache.spark.serializer.KryoSerializer
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.datasyslab.geospark.enums.IndexType
 import org.datasyslab.geospark.serde.GeoSparkKryoRegistrator
 import org.datasyslab.geospark.spatialOperator.RangeQuery
@@ -20,18 +20,15 @@ object StayPointExtraction {
     val numPartitions = args(2).toInt
     val maxDist = args(3).toDouble
     val minTime = args(4).toInt
-
     val spark = SparkSession.builder()
       .master(Config.get("master"))
       .appName("GeoSparkStayPoint")
       .config("spark.serializer", classOf[KryoSerializer].getName)
       .config("spark.kryo.registrator", classOf[GeoSparkKryoRegistrator].getName)
       .getOrCreate()
-
     GeoSparkSQLRegistrator.registerAll(spark)
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
-
     val f = Source.fromFile(queryFile)
     val queries = f.getLines().toArray.map(_.split(" "))
     val t = nanoTime
@@ -64,9 +61,9 @@ object StayPointExtraction {
     sc.stop()
   }
 
-  def findStayPoint(geoms: LineString, timestamps: Array[Long], maxDist: Double, minTime: Int): Array[(Double,Double)] = {
+  def findStayPoint(geoms: LineString, timestamps: Array[Long], maxDist: Double, minTime: Int): Array[(Double, Double)] = {
     val points = geoms.getCoordinates.map(x => (x.x, x.y))
-    if (points.length < 2) return new Array[(Double,Double)](0)
+    if (points.length < 2) return new Array[(Double, Double)](0)
     val entries = (points zip timestamps).toIterator
     var anchor = entries.next
     var res = new Array[(Double, Double)](0)
@@ -96,5 +93,24 @@ object StayPointExtraction {
     val lambda2 = x2.toRadians
     val deltaSigma = acos(sin(phi1) * sin(phi2) + cos(phi1) * cos(phi2) * cos(abs(lambda2 - lambda1)))
     r * deltaSigma
+  }
+
+  def readTraj(file: String, numPartitions: Int): DataFrame = {
+    val spark = SparkSession.builder().getOrCreate()
+    val readDs = spark.read.parquet(file)
+    import spark.implicits._
+    val trajRDD = readDs.as[T].rdd.map(t => {
+      val string = t.points.flatMap(e => Array(e.lon, e.lat)).mkString(",")
+      val tsArray = t.points.flatMap(e => Array(e.t(0))).mkString(",")
+      (string, t.d, tsArray)
+    })
+    val df = trajRDD.toDF("string", "id", "tsArray")
+    df.createOrReplaceTempView("input")
+    val sqlQuery = "SELECT ST_LineStringFromText(CAST(input.string AS STRING), ',') AS linestring, " +
+      "CAST(input.id AS STRING) AS id," +
+      "CAST(input.tsArray AS STRING)  AS tsArray " +
+      "FROM input"
+    val lineStringDF = spark.sql(sqlQuery)
+    lineStringDF.repartition(numPartitions)
   }
 }

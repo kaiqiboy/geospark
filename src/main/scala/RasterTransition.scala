@@ -1,7 +1,7 @@
-import TrajRangeQuery.readTraj
+import TrajRangeQuery.T
 import com.vividsolutions.jts.geom._
 import org.apache.spark.serializer.KryoSerializer
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.datasyslab.geospark.enums.IndexType
 import org.datasyslab.geospark.serde.GeoSparkKryoRegistrator
 import org.datasyslab.geospark.spatialOperator.RangeQuery
@@ -25,11 +25,9 @@ object RasterTransition {
       .config("spark.serializer", classOf[KryoSerializer].getName)
       .config("spark.kryo.registrator", classOf[GeoSparkKryoRegistrator].getName)
       .getOrCreate()
-
     GeoSparkSQLRegistrator.registerAll(spark)
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
-
     val f = Source.fromFile(queryFile)
     val queries = f.getLines().toArray.map(_.split(" "))
     val t = nanoTime
@@ -60,11 +58,11 @@ object RasterTransition {
         timestamps.head < end && timestamps.last >= start
       }.rdd
       val resRDD = combinedRDD
-        .map { case(linestring, timestamps) =>
+        .map { case (linestring, timestamps) =>
           var in = 0
           var out = 0
           stRanges.map { stRange =>
-            if(!(linestring.intersects(stRange._1) && tIntersects((timestamps.head, timestamps.last), stRange._2))) (0,0)
+            if (!(linestring.intersects(stRange._1) && tIntersects((timestamps.head, timestamps.last), stRange._2))) (0, 0)
             else {
               val points = linestring.getCoordinates.map(x => geometryFactory.createPoint(x)) zip timestamps
               val inside = points.map(p => p._1.intersects(stRange._1) &&
@@ -81,7 +79,6 @@ object RasterTransition {
       val empty = stRanges.map(_ => (0, 0))
       val res = resRDD.aggregate(empty)((x, y) => (x zip y).map(x => (x._1._1 + x._2._1, x._1._2 + x._2._2)),
         (x, y) => (x zip y).map(x => (x._1._1 + x._2._1, x._1._2 + x._2._2)))
-
       println(res.take(5))
       combinedRDD.unpersist()
       resRDD.unpersist()
@@ -135,7 +132,27 @@ object RasterTransition {
     val ts = (0 to tSplit).map(x => x * tStep + tMin).sliding(2).toArray
     for (t <- ts) yield (t(0), t(1))
   }
+
   def tIntersects(t1: (Long, Long), t2: (Long, Long)): Boolean = {
     !(t1._2 < t2._1 || t2._2 < t1._1)
+  }
+
+  def readTraj(file: String, numPartitions: Int): DataFrame = {
+    val spark = SparkSession.builder().getOrCreate()
+    val readDs = spark.read.parquet(file)
+    import spark.implicits._
+    val trajRDD = readDs.as[T].rdd.map(t => {
+      val string = t.points.flatMap(e => Array(e.lon, e.lat)).mkString(",")
+      val tsArray = t.points.flatMap(e => Array(e.t(0))).mkString(",")
+      (string, t.d, tsArray)
+    })
+    val df = trajRDD.toDF("string", "id", "tsArray")
+    df.createOrReplaceTempView("input")
+    val sqlQuery = "SELECT ST_LineStringFromText(CAST(input.string AS STRING), ',') AS linestring, " +
+      "CAST(input.id AS STRING) AS id," +
+      "CAST(input.tsArray AS STRING)  AS tsArray " +
+      "FROM input"
+    val lineStringDF = spark.sql(sqlQuery)
+    lineStringDF.repartition(numPartitions)
   }
 }

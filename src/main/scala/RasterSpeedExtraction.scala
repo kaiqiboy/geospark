@@ -1,7 +1,7 @@
-import TrajRangeQuery.readTraj
-import com.vividsolutions.jts.geom.{Coordinate, Envelope, Geometry, GeometryFactory, Polygon}
+import SmSpeed.greatCircleDistance
+import com.vividsolutions.jts.geom.{Coordinate, Geometry, GeometryFactory, Polygon}
 import org.apache.spark.serializer.KryoSerializer
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.datasyslab.geospark.enums.IndexType
 import org.datasyslab.geospark.serde.GeoSparkKryoRegistrator
 import org.datasyslab.geospark.spatialOperator.RangeQuery
@@ -10,7 +10,11 @@ import utils.Config
 
 import java.lang.System.nanoTime
 
-object RasterFlowExtraction {
+object RasterSpeedExtraction {
+  case class TrajPoint(lon: Double, lat: Double, t: Array[Long], v: Option[String])
+
+  case class T(points: Array[TrajPoint], d: String)
+
   def main(args: Array[String]): Unit = {
     val fileName = args(0)
     val numPartitions = args(1).toInt
@@ -33,11 +37,9 @@ object RasterFlowExtraction {
       .config("spark.serializer", classOf[KryoSerializer].getName)
       .config("spark.kryo.registrator", classOf[GeoSparkKryoRegistrator].getName)
       .getOrCreate()
-
     GeoSparkSQLRegistrator.registerAll(spark)
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
-
     val ranges = (0 to NumDays).map(x =>
       (sRange, (x * 86400 + tStart, (x + 1) * 86400 + tStart))).toArray
     for ((s, tQuery) <- ranges) {
@@ -60,17 +62,30 @@ object RasterFlowExtraction {
         .filter { case (_, timestamps) =>
           timestamps.head < end && timestamps.last >= start
         }.rdd
-      val resRDD = combinedRDD.map {
-        x =>
-          raster.map {
-            case (s, t) => if (s.intersects(x._1) && tIntersects(t, (x._2.head, x._2.last))) 1 else 0
-          }
-      }
-      val empty = raster.map(_ => 0)
-      val res = resRDD.aggregate(empty)((x, y) => (x zip y).map(x => x._1 + x._2),
-        (x, y) => (x zip y).map(x => x._1 + x._2))
+      val resRDD = combinedRDD
+        .map {
+          case (geoms, timestamps) =>
+            val coords = geoms.getCoordinates.map(x => (x.x, x.y))
+            val length = coords.sliding(2).map(x => greatCircleDistance(x(0), x(1))).sum
+            val speed = (length / (timestamps.last - timestamps.head) * 3.6).toDouble
+            raster.map {
+              case (s, t) => if (s.intersects(geoms) && tIntersects(t, (timestamps.head, timestamps.last))) (speed,1) else (0.0,0)
+            }
+        }
+      val r = resRDD.mapPartitions { p =>
+        var res = raster.map(_ => (0.0, 0))
+        while (p.hasNext) {
+          res = res.zip(p.next).map { case (x, y) => (x._1 + y._1, x._2 + y._2) }
+        }
+        Iterator(res)
+      }.collect()
+
+      val res = r.drop(1).foldLeft(r.head)((a, b) => a.zip(b).map { case (x, y) => (x._1 + y._1, x._2 + y._2) })
+        .map(x => x._1 / x._2)
+
       println(res.take(10).deep)
       spark.catalog.clearCache()
+      sc.getPersistentRDDs.foreach(x => x._2.unpersist())
       println(s"${tQuery._1} Interval extraction ${(nanoTime - t) * 1e-9} s")
     }
     sc.stop()
@@ -106,5 +121,24 @@ object RasterFlowExtraction {
 
   def tIntersects(t1: (Long, Long), t2: (Long, Long)): Boolean = {
     !(t1._2 < t2._1 || t2._2 < t1._1)
+  }
+
+  def readTraj(file: String, numPartitions: Int): DataFrame = {
+    val spark = SparkSession.builder().getOrCreate()
+    val readDs = spark.read.parquet(file)
+    import spark.implicits._
+    val trajRDD = readDs.as[T].rdd.map(t => {
+      val string = t.points.flatMap(e => Array(e.lon, e.lat)).mkString(",")
+      val tsArray = t.points.flatMap(e => Array(e.t(0))).mkString(",")
+      (string, t.d, tsArray)
+    })
+    val df = trajRDD.toDF("string", "id", "tsArray")
+    df.createOrReplaceTempView("input")
+    val sqlQuery = "SELECT ST_LineStringFromText(CAST(input.string AS STRING), ',') AS linestring, " +
+      "CAST(input.id AS STRING) AS id," +
+      "CAST(input.tsArray AS STRING)  AS tsArray " +
+      "FROM input"
+    val lineStringDF = spark.sql(sqlQuery)
+    lineStringDF.repartition(numPartitions)
   }
 }

@@ -6,11 +6,9 @@ import org.datasyslab.geospark.serde.GeoSparkKryoRegistrator
 import org.datasyslab.geospark.spatialOperator.RangeQuery
 import org.datasyslab.geosparksql.utils.{Adapter, GeoSparkSQLRegistrator}
 import utils.Config
-
 import java.lang.System.nanoTime
 import java.text.SimpleDateFormat
 import java.util.Date
-import scala.collection.JavaConverters._
 import scala.io.Source
 
 object TsFlow {
@@ -21,14 +19,12 @@ object TsFlow {
     val numPartitions = args(1).toInt
     val queryFile = args(2)
     val tStep = args(3).toInt
-
     val spark = SparkSession.builder()
       .master(Config.get("master"))
       .appName("TsFlow")
       .config("spark.serializer", classOf[KryoSerializer].getName)
       .config("spark.kryo.registrator", classOf[GeoSparkKryoRegistrator].getName)
       .getOrCreate()
-
     GeoSparkSQLRegistrator.registerAll(spark)
     val sc = spark.sparkContext
     sc.setLogLevel("ERROR")
@@ -47,7 +43,6 @@ object TsFlow {
       val start = q(4).toLong
       val end = q(5).toLong
       val resultS = RangeQuery.SpatialRangeQuery(pointRDD, sQuery, true, true)
-
       val combinedRDD = resultS.map[(Geometry, String)](f => (f, f.getUserData.asInstanceOf[String]))
         .map {
           case (geoms, tsString) =>
@@ -58,7 +53,6 @@ object TsFlow {
         timestamp < end && timestamp >= start
       }.rdd.map {
         case (geoms, timestamp, _) =>
-
           ts.map(r => if (timestamp <= r._2 && timestamp >= r._1) 1 else 0)
       }
       val r = combinedRDD.mapPartitions { p =>
@@ -70,7 +64,6 @@ object TsFlow {
       }.collect()
       val res = r.drop(1).foldLeft(r.head)((a, b) => a.zip(b).map { case (x, y) => x + y })
       println(res.take(5))
-
       combinedRDD.unpersist()
       pointRDD.rawSpatialRDD.unpersist()
       spark.catalog.clearCache()
@@ -82,8 +75,6 @@ object TsFlow {
   def readEvent(file: String, numPartitions: Int): DataFrame = {
     val spark = SparkSession.builder().getOrCreate()
     val readDs = spark.read.parquet(file)
-    //    readDs.show(5)
-    //    readDs.printSchema()
     import spark.implicits._
     val pointRDD = readDs.as[E].rdd.map(e => {
       val content = ("""\([^]]+\)""".r findAllIn e.shape).next.drop(1).dropRight(1).split(" ")
@@ -91,15 +82,11 @@ object TsFlow {
       (coord, e.d, e.timeStamp(0))
     })
     val df = pointRDD.toDF("coord", "id", "t")
-    //    df.show(5)
-    //    df.printSchema()
     df.createOrReplaceTempView("input")
     val sqlQuery = "SELECT ST_PointFromText(input.coord, ',') AS location, " +
       "CAST(input.t AS STRING) AS timestamp, " +
       "input.id AS id FROM input"
     val pointDF = spark.sql(sqlQuery)
-    //    pointDF.show(5)
-    //    pointDF.printSchema()
     pointDF.repartition(numPartitions)
   }
 
